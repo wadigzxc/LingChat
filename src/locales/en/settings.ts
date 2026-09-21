@@ -995,7 +995,7 @@ export default {
           glowColor: "Glow color",
         },
         lut: {
-          tip: "Grade the colors in Photoshop, then File > Export > Color Lookup Tables, pick CUBE (quality 32 or 64) and import it with the button below. Per-pixel adjustments such as Curves, Levels, Color Balance and Photo Filter carry over; blend modes, layer masks, smart filters and outer glow do not. Only static backgrounds and sprites get graded — animated GIFs are left alone.",
+          tip: "Grade the colors in Photoshop, then File > Export > Color Lookup Tables, pick CUBE (quality 32 or 64) and import it with the button below. Per-pixel adjustments such as Curves, Levels, Color Balance and Photo Filter carry over; blend modes, layer masks, smart filters and outer glow do not. Only static backgrounds and static sprite images get graded — Live2D models and animated GIFs are left alone.",
           table: "Lookup table",
           none: "No grading",
           strength: "Grading strength",
