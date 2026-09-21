@@ -16,7 +16,6 @@
 import { ref, computed, watch, nextTick, onUnmounted, type Ref, type ComputedRef } from "vue";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { useGameStore } from "@/stores/modules/game";
-import { useLightingLutStore } from "@/stores/modules/lighting/lut";
 import { useUIStore } from "@/stores/modules/ui/ui";
 import { EMOTION_CONFIG, EMOTION_CONFIG_EMO } from "@/controllers/emotion/config";
 import type { GameRole } from "@/stores/modules/game/state";
@@ -72,12 +71,10 @@ export function useRoleAvatar(options: UseRoleAvatarOptions): UseRoleAvatarApi {
 
   const gameStore = useGameStore();
   const uiStore = useUIStore();
-  const lightingLut = useLightingLutStore();
 
-  /** 头像文件本身的路径；URL 由它现算，换调色表 / 烘焙完成都会自动重算。 */
   const avatarPath = ref("");
   const targetAvatarUrl = computed(() =>
-    avatarPath.value ? convertFileSrc(lightingLut.displayPath(avatarPath.value)) : "",
+    avatarPath.value ? convertFileSrc(avatarPath.value) : "",
   );
   const activeAnimationClass = ref("normal");
   const isBubbleVisible = ref(false);
@@ -91,7 +88,6 @@ export function useRoleAvatar(options: UseRoleAvatarOptions): UseRoleAvatarApi {
 
   async function resolveAvatar() {
     const currentId = ++resolveAvatarId;
-    void lightingLut.ensureLoaded();
     try {
       const path = await invoke<string>("get_avatar_file", avatarFolderParams(role.value));
       if (currentId === resolveAvatarId) {

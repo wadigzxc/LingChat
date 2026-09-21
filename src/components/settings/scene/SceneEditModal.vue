@@ -321,7 +321,6 @@ import LightingControls from "../lighting/LightingControls.vue";
 import LightingPresetSelect from "../lighting/LightingPresetSelect.vue";
 import { useGameStore } from "../../../stores/modules/game";
 import { useLightingStore } from "../../../stores/modules/lighting";
-import { isLocalFile, useLightingLutStore } from "../../../stores/modules/lighting/lut";
 import { useSettingsStore } from "../../../stores/modules/settings";
 import { EMOTION_CONFIG_EMO } from "../../../controllers/emotion/config";
 import type { BackgroundImageInfo } from "../../../types";
@@ -331,6 +330,7 @@ import {
   angleTowardLight,
   blankLighting,
   cloneLighting,
+  isLocalFile,
   planLighting,
 } from "../../../utils/lighting";
 import { presetNameOf } from "../../../locales/lighting-i18n";
@@ -362,11 +362,8 @@ const emit = defineEmits<{
 
 const gameStore = useGameStore();
 const lightingStore = useLightingStore();
-const lightingLut = useLightingLutStore();
 const settingsStore = useSettingsStore();
 const { t } = useI18n();
-// 草稿里的调色表要在库里查得到才预览得出来。
-void lightingLut.ensureLoaded();
 
 /** 总开关关掉时这里的灯不会亮，但照常允许调，所以只提示不锁死。 */
 const masterOn = computed(() => settingsStore.lighting.masterEnabled);
@@ -404,28 +401,22 @@ const followBase = ref<LightingParams>(blankLighting());
 // ---- sub-state ----
 
 const showLighting = ref(false);
-/** 草稿里挂的调色表；预览要看它，而不是屏幕上正在用的那盏灯。 */
-const draftLut = computed(() =>
-  lightingLut.resolve(lightingDraft.color_lut, lightingDraft.color_lut_strength),
-);
 const previewAvatarPath = ref("");
 const previewAvatarUrl = computed(() =>
-  previewAvatarPath.value
-    ? convertFileSrc(lightingLut.displayPath(previewAvatarPath.value, draftLut.value))
-    : "",
+  previewAvatarPath.value ? convertFileSrc(previewAvatarPath.value) : "",
 );
 
-/** 「导出给 PS」的底稿：这张场景填的背景 + 预览里那张立绘图片。 */
+/** 「导出当前场景图和角色立绘」的底稿：这张场景填的背景 + 预览里那张立绘图片。 */
 const sourceImages = computed(() => {
   const list: { label: string; path: string }[] = [];
   if (isLocalFile(formData.sceneImage))
     list.push({
-      label: t("settings.background.lighting.editor.lut.srcBackground"),
+      label: t("settings.background.lighting.editor.export.srcBackground"),
       path: formData.sceneImage,
     });
   if (isLocalFile(previewAvatarPath.value))
     list.push({
-      label: t("settings.background.lighting.editor.lut.srcAvatar"),
+      label: t("settings.background.lighting.editor.export.srcAvatar"),
       path: previewAvatarPath.value,
     });
   return list;
@@ -529,11 +520,7 @@ async function resolveAvatar() {
 watch(
   () => props.show,
   async (val) => {
-    if (!val) {
-      // 「显示调色前」只是弹窗里的临时对照，留着关窗会让主画面的调色凭空消失。
-      lightingLut.compareOriginal = false;
-      return;
-    }
+    if (!val) return;
     // 底稿要取默认光影，而预设表是懒加载的：不先等它就只会拿到空白灯光。
     await lightingStore.ensurePresets();
     if (props.initialData) {
@@ -570,7 +557,7 @@ watch(
 
 const selectedBackgroundPreview = computed(() => {
   if (!formData.sceneImage) return null;
-  return convertFileSrc(lightingLut.displayPath(formData.sceneImage, draftLut.value));
+  return convertFileSrc(formData.sceneImage);
 });
 
 /** 预览与真实画面走同一个渲染器：这里看到的灯，保存后就是那个样子。 */

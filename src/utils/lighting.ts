@@ -72,8 +72,6 @@ export function blankLighting(): LightingParams {
     breathing_enabled: false,
     breathing_period: 7,
     breathing_amount: 0.18,
-    color_lut: null,
-    color_lut_strength: 1,
   };
 }
 
@@ -285,4 +283,13 @@ export function planLighting(l: LightingParams | null): LightingPlan {
   if (l.grade_enabled) plan.grade = buildGrade(l, breathing);
   if (l.vignette_enabled) plan.vignette = buildVignette(l, breathing);
   return plan;
+}
+
+/**
+ * 只有本地文件能交给后端读盘导出；网络图、内联 data:、blob 与静态资源路径做不到。
+ *
+ * 面板拿它决定「导出当前场景图和角色立绘」按钮该不该亮起来。
+ */
+export function isLocalFile(path: string): boolean {
+  return !!path && !/^(https?:|data:|blob:|@\/|\/\/)/.test(path);
 }

@@ -53,37 +53,8 @@
         </select>
       </div>
 
-      <!-- 调色表：吃 Photoshop「导出颜色查找表」的 .cube -->
-      <template v-if="sec.lut">
-        <div class="flex items-center gap-2">
-          <span class="w-[5.5rem] shrink-0 text-[11px] text-white/50">
-            {{ t(`${L}.lut.table`) }}
-          </span>
-          <select
-            class="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-white focus:border-amber-400/60 focus:outline-none"
-            :value="params.color_lut ?? ''"
-            @change="pickLut(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">{{ t(`${L}.lut.none`) }}</option>
-            <option v-for="o in lightingLut.options" :key="o.value" :value="o.value">
-              {{ o.label }}
-            </option>
-          </select>
-        </div>
-
-        <LightingSliderRow
-          :label="t(`${L}.lut.strength`)"
-          :min="0"
-          :max="100"
-          :step="1"
-          unit="%"
-          color="#a3e635"
-          :disabled="!selectedLut"
-          :model-value="Math.round((params.color_lut_strength ?? 1) * 100)"
-          @update:model-value="setLutStrength"
-        />
-
-        <!-- 先去 PS 调色要有底稿，而底稿必须是软件真正在用的那张原图 -->
+      <!-- 导出当前场景图和角色立绘，拿去 Photoshop 当调色底稿 -->
+      <template v-if="sec.export">
         <div class="flex items-center gap-2">
           <select
             class="w-[5.5rem] shrink-0 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-white focus:border-amber-400/60 focus:outline-none"
@@ -101,41 +72,12 @@
             class="min-w-0 flex-1 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] text-white/70 transition-colors hover:border-amber-400/40 hover:text-amber-200 disabled:opacity-40"
             @click="exportSources"
           >
-            {{ exporting ? t(`${L}.lut.exporting`) : t(`${L}.lut.export`) }}
+            {{ exporting ? t(`${L}.export.exporting`) : t(`${L}.export.button`) }}
           </button>
         </div>
         <div class="text-[11px] leading-snug text-white/35">
-          {{ exportItems.length ? t(`${L}.lut.exportTip`) : t(`${L}.lut.noSource`) }}
+          {{ exportItems.length ? t(`${L}.export.tip`) : t(`${L}.export.noSource`) }}
         </div>
-
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            :disabled="importing"
-            class="rounded-lg border border-amber-400/30 bg-amber-400/10 px-2.5 py-1 text-[11px] font-bold text-amber-200 transition-colors hover:bg-amber-400/20 disabled:opacity-40"
-            @click="chooseCube"
-          >
-            {{ importing ? t(`${L}.lut.importing`) : t(`${L}.lut.import`) }}
-          </button>
-          <button
-            v-if="selectedLut"
-            type="button"
-            class="rounded-lg border border-white/10 px-2.5 py-1 text-[11px] text-white/50 transition-colors hover:border-red-400/40 hover:text-red-200"
-            @click="removeCurrentLut"
-          >
-            {{ t(`${L}.lut.remove`) }}
-          </button>
-        </div>
-
-        <label v-if="selectedLut" class="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            class="h-3.5 w-3.5 rounded accent-amber-500"
-            :checked="lightingLut.compareOriginal"
-            @change="lightingLut.compareOriginal = ($event.target as HTMLInputElement).checked"
-          />
-          <span class="text-[11px] text-white/60">{{ t(`${L}.lut.compare`) }}</span>
-        </label>
       </template>
 
       <template v-for="(grp, gi) in sec.groups" :key="gi">
@@ -185,15 +127,14 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import LightingSliderRow from "./LightingSliderRow.vue";
 import LightingColorRow from "./LightingColorRow.vue";
 import type { LightingParams } from "@/api/services/scene";
-import { angleTowardLight } from "@/utils/lighting";
+import { angleTowardLight, isLocalFile } from "@/utils/lighting";
 import { exportLightingSources } from "@/api/services/lighting";
-import { isLocalFile, useLightingLutStore } from "@/stores/modules/lighting/lut";
 import { useDialogStore } from "@/stores/modules/ui/dialog";
 
 const props = defineProps<{
   params: LightingParams;
   /**
-   * 宿主当前画面上真正在用的静态图（背景、立绘），给「导出给 PS」当底稿。
+   * 宿主当前画面上真正在用的静态图（背景、立绘），给「导出」当底稿。
    *
    * 只有宿主知道用的是哪张图：全局编辑器取主画面那张，场景编辑器取草稿里填的。
    * 网络图和 `@/` 静态资源后端读不到，所以这里收下来还要再过一道筛。
@@ -203,56 +144,7 @@ const props = defineProps<{
 
 const { t } = useI18n();
 const L = "settings.background.lighting.editor";
-const lightingLut = useLightingLutStore();
 const dialogStore = useDialogStore();
-
-// 下拉、删除、强度都按「表在库里」来判断，所以先把库拿回来。
-void lightingLut.ensureLoaded();
-const selectedLut = computed(
-  () => lightingLut.luts.find((lut) => lut.id === props.params.color_lut) ?? null,
-);
-
-/** 从 PS 导出的 .cube 里挑一份，导完直接用上——她的流程是「调好→导进来→看效果」。 */
-const importing = ref(false);
-async function chooseCube() {
-  const path = await openDialog({
-    multiple: false,
-    filters: [{ name: "Photoshop LUT (.cube)", extensions: ["cube"] }],
-  });
-  if (typeof path !== "string") return;
-  importing.value = true;
-  try {
-    const info = await lightingLut.importLut(path);
-    pickLut(info.id);
-  } catch (e) {
-    await dialogStore.alert(t(`${L}.lut.importFailed`, { msg: String(e) }));
-  } finally {
-    importing.value = false;
-  }
-}
-
-function pickLut(id: string) {
-  props.params.color_lut = id || null;
-  // 强度 0 会让刚选上的表看起来「没反应」，看起来像坏了；选表就当要用。
-  if (id && !((props.params.color_lut_strength ?? 1) > 0)) props.params.color_lut_strength = 1;
-}
-
-function setLutStrength(percent: number) {
-  props.params.color_lut_strength = Math.round(percent) / 100;
-}
-
-async function removeCurrentLut() {
-  const lut = selectedLut.value;
-  if (!lut) return;
-  const ok = await dialogStore.confirm(t(`${L}.lut.removeConfirm`, { name: lut.name }));
-  if (!ok) return;
-  try {
-    await lightingLut.removeLut(lut.id);
-    pickLut("");
-  } catch (e) {
-    await dialogStore.alert(t(`${L}.lut.removeFailed`, { msg: String(e) }));
-  }
-}
 
 // ---- 导出原图给 Photoshop 当调色底稿 ----
 
@@ -287,18 +179,18 @@ async function exportSources() {
     const failed = outcomes.filter((o) => o.error);
     // 透明立绘存成 JPG 会被后端按白底压平，这属于"结果和你预期的不一样"，必须说。
     const flattened = outcomes.filter((o) => o.alphaFlattened);
-    const lines = [t(`${L}.lut.exported`, { count: saved.length, dir })];
+    const lines = [t(`${L}.export.done`, { count: saved.length, dir })];
     if (flattened.length)
-      lines.push(t(`${L}.lut.exportFlattened`, { names: flattened.map((o) => o.name).join("、") }));
+      lines.push(t(`${L}.export.flattened`, { names: flattened.map((o) => o.name).join("、") }));
     if (failed.length)
       lines.push(
-        t(`${L}.lut.exportFailedItems`, {
+        t(`${L}.export.failedItems`, {
           items: failed.map((o) => `${o.name}：${o.error}`).join("\n"),
         }),
       );
     await dialogStore.alert(lines.join("\n"));
   } catch (e) {
-    await dialogStore.alert(t(`${L}.lut.exportFailed`, { msg: String(e) }));
+    await dialogStore.alert(t(`${L}.export.failed`, { msg: String(e) }));
   } finally {
     exporting.value = false;
   }
@@ -407,8 +299,8 @@ interface Section {
   enable?: string;
   tip?: string;
   pad?: boolean;
-  /** 调色表分区：控件特殊（要选文件、要查库），不走通用配置表 */
-  lut?: boolean;
+  /** 导出分区：控件特殊（要选目录、要读宿主传来的图路径），不走通用配置表 */
+  export?: boolean;
   selects?: SelectRow[];
   groups?: Group[];
 }
@@ -675,10 +567,9 @@ const sections = computed<Section[]>(() => {
     },
     // 排在「整体染色」后面：两件事都是给整幅画面的颜色收尾，跟灯没关系。
     {
-      key: "lut",
-      title: t(`${L}.section.lut`),
-      tip: t(`${L}.lut.tip`),
-      lut: true,
+      key: "export",
+      title: t(`${L}.section.export`),
+      export: true,
     },
   ];
 });

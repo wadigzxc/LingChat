@@ -206,7 +206,6 @@ import { applyLighting, clearLighting, saveLightingPreset } from "../../../api/s
 import type { LightingParams } from "../../../api/services/scene";
 import { useGameStore } from "../../../stores/modules/game";
 import { useLightingStore } from "../../../stores/modules/lighting";
-import { isLocalFile, useLightingLutStore } from "../../../stores/modules/lighting/lut";
 import { useUIStore } from "../../../stores/modules/ui/ui";
 import { useDialogStore } from "../../../stores/modules/ui/dialog";
 import { EMOTION_CONFIG_EMO } from "../../../controllers/emotion/config";
@@ -214,6 +213,7 @@ import {
   angleTowardLight,
   blankLighting,
   cloneLighting,
+  isLocalFile,
   planLighting,
 } from "../../../utils/lighting";
 import { presetDescriptionOf, presetMoodOf, presetNameOf } from "../../../locales/lighting-i18n";
@@ -225,10 +225,7 @@ const { t } = useI18n();
 const gameStore = useGameStore();
 const uiStore = useUIStore();
 const lightingStore = useLightingStore();
-const lightingLut = useLightingLutStore();
 const dialogStore = useDialogStore();
-// 草稿里挂的调色表要先在库里查得到才能预览，所以进编辑器就取一次列表。
-void lightingLut.ensureLoaded();
 
 const L = "settings.background.lighting.editor";
 
@@ -302,10 +299,7 @@ const bgSrc = computed(() => {
   ) {
     return bg || "";
   }
-  // 预览要看的是草稿里那张表的效果，而不是屏幕上正在用的，所以显式传草稿参数。
-  return convertFileSrc(
-    lightingLut.displayPath(bg, lightingLut.resolve(draft.color_lut, draft.color_lut_strength)),
-  );
+  return convertFileSrc(bg);
 });
 
 /**
@@ -319,20 +313,10 @@ const neutralBackdrop: CSSProperties = {
     "linear-gradient(158deg, #475166 0%, #1a1f29 100%)",
 };
 const avatarPath = ref("");
-/** 立绘 URL 由路径现算，这样换调色表 / 烘焙完成都会自动跟上。 */
-const avatarSrc = computed(() =>
-  avatarPath.value
-    ? convertFileSrc(
-        lightingLut.displayPath(
-          avatarPath.value,
-          lightingLut.resolve(draft.color_lut, draft.color_lut_strength),
-        ),
-      )
-    : "",
-);
+const avatarSrc = computed(() => (avatarPath.value ? convertFileSrc(avatarPath.value) : ""));
 
 /**
- * 「导出给 PS」的底稿清单：主画面真正在用的那张背景 + 当前立绘图片。
+ * 「导出当前场景图和角色立绘」的底稿清单：主画面真正在用的那张背景 + 当前立绘图片。
  *
  * 取主画面那份而不是场景表里的字段，跟上面 `bgSrc` 同一个理由。Live2D 角色在这里
  * 拿不到静态图路径（`get_avatar_file` 失败就是空），所以它自然不在清单里。
@@ -340,9 +324,9 @@ const avatarSrc = computed(() =>
 const sourceImages = computed(() => {
   const list: { label: string; path: string }[] = [];
   if (isLocalFile(uiStore.currentBackground))
-    list.push({ label: t(`${L}.lut.srcBackground`), path: uiStore.currentBackground });
+    list.push({ label: t(`${L}.export.srcBackground`), path: uiStore.currentBackground });
   if (isLocalFile(avatarPath.value))
-    list.push({ label: t(`${L}.lut.srcAvatar`), path: avatarPath.value });
+    list.push({ label: t(`${L}.export.srcAvatar`), path: avatarPath.value });
   return list;
 });
 
@@ -408,8 +392,6 @@ function revert() {
 }
 async function close() {
   clearTimeout(timer);
-  // 「显示调色前」只是编辑器里看一眼的临时状态，留着关掉窗口会让主画面的调色凭空消失。
-  lightingLut.compareOriginal = false;
   if (savedFlag) {
     emit("close");
     return;

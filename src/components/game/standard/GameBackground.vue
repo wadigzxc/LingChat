@@ -118,7 +118,6 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { toPlayableMediaUrl } from "@/utils/mediaUrl";
 import { useUIStore } from "../../../stores/modules/ui/ui";
 import { useLightingStore } from "@/stores/modules/lighting";
-import { useLightingLutStore } from "@/stores/modules/lighting/lut";
 import ImageAcrossFade from "@/components/ui/ImageAcrossFade.vue";
 import AudioAcrossFade from "@/components/ui/AudioAcrossFade.vue";
 import AmbientLoopPlayer from "@/components/ui/AmbientLoopPlayer.vue";
@@ -131,9 +130,6 @@ import BAParticles from "./particles/BAParticles.vue";
 
 const uiStore = useUIStore();
 const lightingStore = useLightingStore();
-const lightingLut = useLightingLutStore();
-// 主窗口与投屏窗口各自挂载本组件，所以两边都会取一次调色表列表。
-void lightingLut.ensureLoaded();
 
 const backgroundSrc = computed(() => {
   const bg = uiStore.currentBackground;
@@ -146,8 +142,7 @@ const backgroundSrc = computed(() => {
   ) {
     return bg || "";
   }
-  // 调色表是后端烘好的另一张图；还没烘出来时先用原图，烘完这条 computed 会重算。
-  return convertFileSrc(lightingLut.displayPath(bg));
+  return convertFileSrc(bg);
 });
 
 // 统一转换入口：currentBackgroundMusic 存原始路径，此处转可播放 URL（Android 走 blob，见 toPlayableMediaUrl）

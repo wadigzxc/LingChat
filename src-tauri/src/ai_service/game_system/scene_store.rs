@@ -251,14 +251,6 @@ pub struct LightingParams {
     /// 呼吸幅度 (0–1)
     #[serde(default = "default_breathing_amount")]
     pub breathing_amount: f64,
-
-    // ---------- 调色表（外部导进来的 .cube） ----------
-    /// 已导入调色表的 id（`lighting_lut_list` 里的那些）；None = 不做调色
-    #[serde(default)]
-    pub color_lut: Option<String>,
-    /// 调色强度 (0–1)，与未调色的原图混合
-    #[serde(default = "default_one")]
-    pub color_lut_strength: f64,
 }
 
 impl Default for LightingParams {
@@ -294,8 +286,6 @@ impl Default for LightingParams {
             breathing_enabled: false,
             breathing_period: default_breathing_period(),
             breathing_amount: default_breathing_amount(),
-            color_lut: None,
-            color_lut_strength: default_one(),
         }
     }
 }

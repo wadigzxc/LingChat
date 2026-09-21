@@ -91,46 +91,7 @@ export async function deleteLightingPreset(id: string): Promise<void> {
   await invoke("lighting_preset_delete", { id });
 }
 
-// ===== 调色表：Photoshop「导出颜色查找表」的 .cube =====
-
-/** 一份已导入的调色表。`size` 就是 PS 导出对话框里的「品质 / 网格点」。 */
-export interface LutInfo {
-  id: string;
-  name: string;
-  size: number;
-  importedAt: number;
-}
-
-export async function listLightingLuts(): Promise<LutInfo[]> {
-  return invoke<LutInfo[]>("lighting_lut_list");
-}
-
-/** 从磁盘上的 .cube 导入；校验不过时后端返回中文原因，面板原样显示。 */
-export async function importLightingLut(req: {
-  path: string;
-  name?: string | null;
-}): Promise<LutInfo> {
-  return invoke<LutInfo>("lighting_lut_import", {
-    req: { path: req.path, name: req.name ?? null },
-  });
-}
-
-export async function deleteLightingLut(id: string): Promise<void> {
-  await invoke("lighting_lut_delete", { id });
-}
-
-/**
- * 把调色表烘进一张静态图，返回缓存图的路径。
- *
- * 后端按「原图 + 调色表 + 强度」做哈希缓存，所以同一个组合只会真的算一次。
- */
-export async function bakeLightingLut(req: {
-  imagePath: string;
-  lutId: string;
-  strength: number;
-}): Promise<string> {
-  return invoke<string>("lighting_lut_bake", { req });
-}
+// ===== 导出当前场景图和角色立绘给 Photoshop =====
 
 /** 一张图的导出结果。逐张报，所以背景失败不会连累立绘。 */
 export interface SourceExportOutcome {
@@ -145,13 +106,13 @@ export interface SourceExportOutcome {
 /**
  * 把软件正在用的原图另存成 PNG / JPG，作为 Photoshop 里的调色底稿。
  *
- * 只导原图：调色表作用在原图像素上，背景滤镜和光效层是之后才叠的，所以拿屏幕截图
- * 当底稿会二次叠加，越调越偏。
+ * 只导原图：软件里的背景滤镜和光效层是叠在原图上的，拿屏幕截图当底稿会二次叠加，
+ * 越调越偏。
  */
 export async function exportLightingSources(req: {
   outDir: string;
   items: { path: string; name: string }[];
   format: "png" | "jpg";
 }): Promise<SourceExportOutcome[]> {
-  return invoke<SourceExportOutcome[]>("lighting_lut_export_source", { req });
+  return invoke<SourceExportOutcome[]>("lighting_export_source", { req });
 }
