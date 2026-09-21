@@ -982,6 +982,17 @@ export default {
           removeConfirm:
             "确定删除调色表「{name}」？用了这张表的灯光会退回不调色，预设本身不会被删。",
           removeFailed: "删除失败：{msg}",
+          srcBackground: "背景",
+          srcAvatar: "立绘",
+          export: "导出当前场景图给 PS",
+          exporting: "导出中…",
+          exportTip:
+            "在 PS 里就打开这张导出来的图调色。软件里的背景滤镜和光效是调色之后才叠上去的，所以别拿屏幕截图当底稿，那样会叠加两次。",
+          noSource: "当前画面用的是网络图或软件内置图，读不到本地文件，导不出来。",
+          exported: "已导出 {count} 张到：{dir}",
+          exportFlattened: "{names} 有透明区域，JPG 存不下透明，已按白底压平。",
+          exportFailedItems: "这几张没导出去：{items}",
+          exportFailed: "导出失败：{msg}",
         },
       },
     },

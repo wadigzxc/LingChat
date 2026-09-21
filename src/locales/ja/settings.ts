@@ -982,6 +982,18 @@ export default {
           removeConfirm:
             "ルックアップテーブル「{name}」を削除しますか？この表を使っていたライトは補正なしに戻ります。プリセット自体は残ります。",
           removeFailed: "削除に失敗しました：{msg}",
+          srcBackground: "背景",
+          srcAvatar: "立ち絵",
+          export: "現在のシーン画像を PS 用に書き出す",
+          exporting: "書き出し中…",
+          exportTip:
+            "Photoshop ではこの書き出し画像を開いて補正してください。ソフト内の背景フィルターと光の効果は補正の後から重なるので、画面のスクリーンショットを下敷きにすると二重にかかります。",
+          noSource:
+            "今の画面はネットワーク上の画像か内蔵画像のため、ローカルファイルを書き出せません。",
+          exported: "{count} 枚を {dir} に書き出しました",
+          exportFlattened: "{names} は透明部分があるため、JPG では白背景に塗り潰しました。",
+          exportFailedItems: "書き出せなかった画像：{items}",
+          exportFailed: "書き出しに失敗しました：{msg}",
         },
       },
     },

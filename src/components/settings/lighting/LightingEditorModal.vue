@@ -72,7 +72,7 @@
               </div>
 
               <!-- 各个光影层：与场景编辑器共用同一套控件 -->
-              <LightingControls :params="draft" />
+              <LightingControls :params="draft" :sources="sourceImages" />
 
               <button
                 @click="resetAll"
@@ -206,7 +206,7 @@ import { applyLighting, clearLighting, saveLightingPreset } from "../../../api/s
 import type { LightingParams } from "../../../api/services/scene";
 import { useGameStore } from "../../../stores/modules/game";
 import { useLightingStore } from "../../../stores/modules/lighting";
-import { useLightingLutStore } from "../../../stores/modules/lighting/lut";
+import { isLocalFile, useLightingLutStore } from "../../../stores/modules/lighting/lut";
 import { useUIStore } from "../../../stores/modules/ui/ui";
 import { useDialogStore } from "../../../stores/modules/ui/dialog";
 import { EMOTION_CONFIG_EMO } from "../../../controllers/emotion/config";
@@ -330,6 +330,21 @@ const avatarSrc = computed(() =>
       )
     : "",
 );
+
+/**
+ * 「导出给 PS」的底稿清单：主画面真正在用的那张背景 + 当前立绘图片。
+ *
+ * 取主画面那份而不是场景表里的字段，跟上面 `bgSrc` 同一个理由。Live2D 角色在这里
+ * 拿不到静态图路径（`get_avatar_file` 失败就是空），所以它自然不在清单里。
+ */
+const sourceImages = computed(() => {
+  const list: { label: string; path: string }[] = [];
+  if (isLocalFile(uiStore.currentBackground))
+    list.push({ label: t(`${L}.lut.srcBackground`), path: uiStore.currentBackground });
+  if (isLocalFile(avatarPath.value))
+    list.push({ label: t(`${L}.lut.srcAvatar`), path: avatarPath.value });
+  return list;
+});
 
 async function resolveAvatar() {
   avatarPath.value = "";

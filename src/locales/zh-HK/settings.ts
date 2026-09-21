@@ -940,6 +940,17 @@ export default {
           removeConfirm:
             "確定刪除調色表「{name}」？用咗呢張表嘅燈光會退回唔調色，預設本身唔會被刪。",
           removeFailed: "刪除失敗：{msg}",
+          srcBackground: "背景",
+          srcAvatar: "企繪",
+          export: "匯出而家嘅場景圖 PS",
+          exporting: "匯出中…",
+          exportTip:
+            "喺 PS 入面就打開呢張匯出嚟嘅圖執色；程式入面嘅背景濾鏡同事光效果係調色之後先疊上去，所以唔好擷螢幕當底稿，會疊多次。",
+          noSource: "而家畫面用嘅係網路圖或程式內置圖，讀唔到本機檔案，匯出唔到。",
+          exported: "已匯出 {count} 張去：{dir}",
+          exportFlattened: "{names} 有透明位置，JPG 裝唔住透明，已經用白底壓平。",
+          exportFailedItems: "呢幾張匯出唔到：{items}",
+          exportFailed: "匯出失敗：{msg}",
         },
       },
     },

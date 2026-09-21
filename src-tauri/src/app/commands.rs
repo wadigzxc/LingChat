@@ -87,6 +87,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         api::lighting::lighting_lut_import,
         api::lighting::lighting_lut_delete,
         api::lighting::lighting_lut_bake,
+        api::lighting::lighting_lut_export_source,
         api::music::get_music_list,
         api::music::get_music_file,
         api::music::upload_music,

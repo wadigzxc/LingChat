@@ -33,7 +33,7 @@ const scheduled = new Map<string, ReturnType<typeof setTimeout>>();
 const SETTLE_MS = 250;
 
 /** 只有本地文件能交给后端烘；网络图、内联 data: 与静态资源原样透出。 */
-function isLocalFile(path: string): boolean {
+export function isLocalFile(path: string): boolean {
   return !!path && !/^(https?:|data:|blob:|@\/|\/\/)/.test(path);
 }
 

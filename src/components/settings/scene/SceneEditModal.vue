@@ -188,7 +188,7 @@
                   <!-- 与光影编辑器共用同一套控件：以前这里只认最早 11 个字段，进阶层
                        看不到，保存还会把它们抹掉。现在不管有没有固定都照常显示，
                        底稿就是画面上真正生效的那盏灯。 -->
-                  <LightingControls :params="lightingDraft" />
+                  <LightingControls :params="lightingDraft" :sources="sourceImages" />
                 </div>
               </section>
             </div>
@@ -321,7 +321,7 @@ import LightingControls from "../lighting/LightingControls.vue";
 import LightingPresetSelect from "../lighting/LightingPresetSelect.vue";
 import { useGameStore } from "../../../stores/modules/game";
 import { useLightingStore } from "../../../stores/modules/lighting";
-import { useLightingLutStore } from "../../../stores/modules/lighting/lut";
+import { isLocalFile, useLightingLutStore } from "../../../stores/modules/lighting/lut";
 import { useSettingsStore } from "../../../stores/modules/settings";
 import { EMOTION_CONFIG_EMO } from "../../../controllers/emotion/config";
 import type { BackgroundImageInfo } from "../../../types";
@@ -414,6 +414,22 @@ const previewAvatarUrl = computed(() =>
     ? convertFileSrc(lightingLut.displayPath(previewAvatarPath.value, draftLut.value))
     : "",
 );
+
+/** 「导出给 PS」的底稿：这张场景填的背景 + 预览里那张立绘图片。 */
+const sourceImages = computed(() => {
+  const list: { label: string; path: string }[] = [];
+  if (isLocalFile(formData.sceneImage))
+    list.push({
+      label: t("settings.background.lighting.editor.lut.srcBackground"),
+      path: formData.sceneImage,
+    });
+  if (isLocalFile(previewAvatarPath.value))
+    list.push({
+      label: t("settings.background.lighting.editor.lut.srcAvatar"),
+      path: previewAvatarPath.value,
+    });
+  return list;
+});
 
 // ---- 跟随 / 固定 ----
 

@@ -131,3 +131,27 @@ export async function bakeLightingLut(req: {
 }): Promise<string> {
   return invoke<string>("lighting_lut_bake", { req });
 }
+
+/** 一张图的导出结果。逐张报，所以背景失败不会连累立绘。 */
+export interface SourceExportOutcome {
+  name: string;
+  /** 写出去的文件完整路径；失败为 null */
+  saved: string | null;
+  error: string | null;
+  /** 带透明的图存成 JPG 时后端按白底压平，面板要提醒一句 */
+  alphaFlattened: boolean;
+}
+
+/**
+ * 把软件正在用的原图另存成 PNG / JPG，作为 Photoshop 里的调色底稿。
+ *
+ * 只导原图：调色表作用在原图像素上，背景滤镜和光效层是之后才叠的，所以拿屏幕截图
+ * 当底稿会二次叠加，越调越偏。
+ */
+export async function exportLightingSources(req: {
+  outDir: string;
+  items: { path: string; name: string }[];
+  format: "png" | "jpg";
+}): Promise<SourceExportOutcome[]> {
+  return invoke<SourceExportOutcome[]>("lighting_lut_export_source", { req });
+}

@@ -322,3 +322,29 @@ pub async fn lighting_lut_bake(req: BakeLutRequest) -> Result<String, String> {
         },
     }
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportSourceRequest {
+    /// 用户挑好的导出目录
+    pub out_dir: String,
+    /// 要导出的图（背景、立绘各一条）
+    pub items: Vec<lighting_lut::ExportItem>,
+    /// "png" 或 "jpg"
+    pub format: String,
+}
+
+/// 把当前场景真正在用的原图另存成 PNG / JPG，给她拿去 Photoshop 当调色底稿。
+///
+/// 逐张返回结果：背景读不到不该连累立绘，所以不整体报错。解码是 CPU 活，跟烘焙一样
+/// 放 `spawn_blocking`。
+#[tauri::command]
+pub async fn lighting_lut_export_source(
+    req: ExportSourceRequest,
+) -> Result<Vec<lighting_lut::ExportOutcome>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        lighting_lut::export_sources(Path::new(&req.out_dir), &req.items, &req.format)
+    })
+    .await
+    .map_err(|e| format!("导出任务没跑起来：{e}"))
+}

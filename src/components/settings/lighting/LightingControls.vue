@@ -83,6 +83,31 @@
           @update:model-value="setLutStrength"
         />
 
+        <!-- 先去 PS 调色要有底稿，而底稿必须是软件真正在用的那张原图 -->
+        <div class="flex items-center gap-2">
+          <select
+            class="w-[5.5rem] shrink-0 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-white focus:border-amber-400/60 focus:outline-none"
+            :value="exportFormat"
+            @change="
+              exportFormat = ($event.target as HTMLSelectElement).value === 'jpg' ? 'jpg' : 'png'
+            "
+          >
+            <option value="png">PNG</option>
+            <option value="jpg">JPG</option>
+          </select>
+          <button
+            type="button"
+            :disabled="exporting || !exportItems.length"
+            class="min-w-0 flex-1 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] text-white/70 transition-colors hover:border-amber-400/40 hover:text-amber-200 disabled:opacity-40"
+            @click="exportSources"
+          >
+            {{ exporting ? t(`${L}.lut.exporting`) : t(`${L}.lut.export`) }}
+          </button>
+        </div>
+        <div class="text-[11px] leading-snug text-white/35">
+          {{ exportItems.length ? t(`${L}.lut.exportTip`) : t(`${L}.lut.noSource`) }}
+        </div>
+
         <div class="flex items-center gap-2">
           <button
             type="button"
@@ -161,10 +186,20 @@ import LightingSliderRow from "./LightingSliderRow.vue";
 import LightingColorRow from "./LightingColorRow.vue";
 import type { LightingParams } from "@/api/services/scene";
 import { angleTowardLight } from "@/utils/lighting";
-import { useLightingLutStore } from "@/stores/modules/lighting/lut";
+import { exportLightingSources } from "@/api/services/lighting";
+import { isLocalFile, useLightingLutStore } from "@/stores/modules/lighting/lut";
 import { useDialogStore } from "@/stores/modules/ui/dialog";
 
-const props = defineProps<{ params: LightingParams }>();
+const props = defineProps<{
+  params: LightingParams;
+  /**
+   * 宿主当前画面上真正在用的静态图（背景、立绘），给「导出给 PS」当底稿。
+   *
+   * 只有宿主知道用的是哪张图：全局编辑器取主画面那张，场景编辑器取草稿里填的。
+   * 网络图和 `@/` 静态资源后端读不到，所以这里收下来还要再过一道筛。
+   */
+  sources?: { label: string; path: string }[];
+}>();
 
 const { t } = useI18n();
 const L = "settings.background.lighting.editor";
@@ -216,6 +251,56 @@ async function removeCurrentLut() {
     pickLut("");
   } catch (e) {
     await dialogStore.alert(t(`${L}.lut.removeFailed`, { msg: String(e) }));
+  }
+}
+
+// ---- 导出原图给 Photoshop 当调色底稿 ----
+
+const exportFormat = ref<"png" | "jpg">("png");
+const exporting = ref(false);
+
+/** 文件名主干：「背景_夜晚」这种，她在文件夹里一眼认得出是哪张。 */
+function stemOf(path: string): string {
+  const file = path.split(/[\\/]/).pop() ?? path;
+  return file.replace(/\.[^.]*$/, "") || "scene";
+}
+
+const exportItems = computed(() =>
+  (props.sources ?? [])
+    .filter((src) => isLocalFile(src.path))
+    .map((src) => ({ path: src.path, name: `${src.label}_${stemOf(src.path)}` })),
+);
+
+async function exportSources() {
+  const items = exportItems.value;
+  if (!items.length || exporting.value) return;
+  const dir = await openDialog({ directory: true });
+  if (typeof dir !== "string") return;
+  exporting.value = true;
+  try {
+    const outcomes = await exportLightingSources({
+      outDir: dir,
+      items,
+      format: exportFormat.value,
+    });
+    const saved = outcomes.filter((o) => o.saved);
+    const failed = outcomes.filter((o) => o.error);
+    // 透明立绘存成 JPG 会被后端按白底压平，这属于"结果和你预期的不一样"，必须说。
+    const flattened = outcomes.filter((o) => o.alphaFlattened);
+    const lines = [t(`${L}.lut.exported`, { count: saved.length, dir })];
+    if (flattened.length)
+      lines.push(t(`${L}.lut.exportFlattened`, { names: flattened.map((o) => o.name).join("、") }));
+    if (failed.length)
+      lines.push(
+        t(`${L}.lut.exportFailedItems`, {
+          items: failed.map((o) => `${o.name}：${o.error}`).join("\n"),
+        }),
+      );
+    await dialogStore.alert(lines.join("\n"));
+  } catch (e) {
+    await dialogStore.alert(t(`${L}.lut.exportFailed`, { msg: String(e) }));
+  } finally {
+    exporting.value = false;
   }
 }
 

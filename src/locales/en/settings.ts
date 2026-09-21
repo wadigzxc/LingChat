@@ -1007,6 +1007,19 @@ export default {
           removeConfirm:
             "Delete the lookup table “{name}”? Lighting that uses it falls back to no grading; the preset itself is kept.",
           removeFailed: "Delete failed: {msg}",
+          srcBackground: "Background",
+          srcAvatar: "Sprite",
+          export: "Export scene images for PS",
+          exporting: "Exporting…",
+          exportTip:
+            "Open the exported file in Photoshop to grade it. The background filter and the lighting layers are applied after grading, so don't use a screenshot as your base — the effect would be applied twice.",
+          noSource:
+            "The current picture is a remote or built-in image, so there is no local file to export.",
+          exported: "Exported {count} file(s) to: {dir}",
+          exportFlattened:
+            "{names} had transparency, which JPG cannot keep, so it was flattened onto white.",
+          exportFailedItems: "These could not be exported: {items}",
+          exportFailed: "Export failed: {msg}",
         },
       },
     },
