@@ -321,6 +321,7 @@ import LightingControls from "../lighting/LightingControls.vue";
 import LightingPresetSelect from "../lighting/LightingPresetSelect.vue";
 import { useGameStore } from "../../../stores/modules/game";
 import { useLightingStore } from "../../../stores/modules/lighting";
+import { useLightingLutStore } from "../../../stores/modules/lighting/lut";
 import { useSettingsStore } from "../../../stores/modules/settings";
 import { EMOTION_CONFIG_EMO } from "../../../controllers/emotion/config";
 import type { BackgroundImageInfo } from "../../../types";
@@ -361,8 +362,11 @@ const emit = defineEmits<{
 
 const gameStore = useGameStore();
 const lightingStore = useLightingStore();
+const lightingLut = useLightingLutStore();
 const settingsStore = useSettingsStore();
 const { t } = useI18n();
+// 草稿里的调色表要在库里查得到才预览得出来。
+void lightingLut.ensureLoaded();
 
 /** 总开关关掉时这里的灯不会亮，但照常允许调，所以只提示不锁死。 */
 const masterOn = computed(() => settingsStore.lighting.masterEnabled);
@@ -400,7 +404,16 @@ const followBase = ref<LightingParams>(blankLighting());
 // ---- sub-state ----
 
 const showLighting = ref(false);
-const previewAvatarUrl = ref("");
+/** 草稿里挂的调色表；预览要看它，而不是屏幕上正在用的那盏灯。 */
+const draftLut = computed(() =>
+  lightingLut.resolve(lightingDraft.color_lut, lightingDraft.color_lut_strength),
+);
+const previewAvatarPath = ref("");
+const previewAvatarUrl = computed(() =>
+  previewAvatarPath.value
+    ? convertFileSrc(lightingLut.displayPath(previewAvatarPath.value, draftLut.value))
+    : "",
+);
 
 // ---- 跟随 / 固定 ----
 
@@ -475,7 +488,7 @@ const followedName = computed(() =>
 // ---- role avatar ----
 
 async function resolveAvatar() {
-  previewAvatarUrl.value = "";
+  previewAvatarPath.value = "";
   const roleId = gameStore.currentInteractRoleId;
   if (!roleId) return;
   const role = gameStore.gameRoles[roleId];
@@ -489,9 +502,9 @@ async function resolveAvatar() {
       emotion: mappedEmotion,
       clothesName,
     });
-    previewAvatarUrl.value = convertFileSrc(path);
+    previewAvatarPath.value = path;
   } catch {
-    previewAvatarUrl.value = "";
+    previewAvatarPath.value = "";
   }
 }
 
@@ -500,7 +513,11 @@ async function resolveAvatar() {
 watch(
   () => props.show,
   async (val) => {
-    if (!val) return;
+    if (!val) {
+      // 「显示调色前」只是弹窗里的临时对照，留着关窗会让主画面的调色凭空消失。
+      lightingLut.compareOriginal = false;
+      return;
+    }
     // 底稿要取默认光影，而预设表是懒加载的：不先等它就只会拿到空白灯光。
     await lightingStore.ensurePresets();
     if (props.initialData) {
@@ -537,7 +554,7 @@ watch(
 
 const selectedBackgroundPreview = computed(() => {
   if (!formData.sceneImage) return null;
-  return convertFileSrc(formData.sceneImage);
+  return convertFileSrc(lightingLut.displayPath(formData.sceneImage, draftLut.value));
 });
 
 /** 预览与真实画面走同一个渲染器：这里看到的灯，保存后就是那个样子。 */

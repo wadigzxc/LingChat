@@ -72,6 +72,8 @@ export function blankLighting(): LightingParams {
     breathing_enabled: false,
     breathing_period: 7,
     breathing_amount: 0.18,
+    color_lut: null,
+    color_lut_strength: 1,
   };
 }
 

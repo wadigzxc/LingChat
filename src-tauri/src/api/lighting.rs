@@ -6,9 +6,12 @@
 //! 渲染优先级在前端 `useLighting` 里落地：
 //! 总开关关 → 无光影；否则 运行时覆盖 → 场景自带 → 默认光影（面板那盏只兜底）。
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::ai_service::game_system::lighting_lut::{self, LutInfo};
 use crate::ai_service::game_system::lighting_store::{self, LightingPreset};
 use crate::ai_service::game_system::scene_store::{LightingOverride, LightingParams};
 use crate::ai_service::tools::game_status_handle;
@@ -253,4 +256,69 @@ pub async fn lighting_report_active(
     let mut gs = game_status.lock().await;
     gs.set_lighting_active(req.preset.filter(|s| !s.is_empty()), &req.source);
     Ok(())
+}
+
+// ===== 调色表：Photoshop 导出的 .cube =====
+
+/// 已导入的调色表列表。
+#[tauri::command]
+pub async fn lighting_lut_list() -> Result<Vec<LutInfo>, String> {
+    Ok(lighting_lut::list())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportLutRequest {
+    /// 用户挑中的 .cube 文件绝对路径
+    pub path: String,
+    /// 显示名；留空则沿用文件名
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// 导入一份调色表。校验不过直接把后端的中文原因抛回去，面板原样显示。
+#[tauri::command]
+pub async fn lighting_lut_import(req: ImportLutRequest) -> Result<LutInfo, String> {
+    lighting_lut::import(Path::new(&req.path), req.name.as_deref())
+}
+
+#[tauri::command]
+pub async fn lighting_lut_delete(id: String) -> Result<(), String> {
+    lighting_lut::delete(&id)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BakeLutRequest {
+    /// 原图绝对路径（背景 / 立绘文件本身）
+    pub image_path: String,
+    pub lut_id: String,
+    /// 调色强度 0–1；0 表示「显示调色前」，直接回原图
+    pub strength: f64,
+}
+
+/// 把调色表烘进一张静态图，返回缓存图路径（已有缓存则直接回缓存）。
+///
+/// 逐像素查表是 CPU 密集活，4K 图要几百毫秒到几秒，所以放 `spawn_blocking`，
+/// 不能占着异步运行时。失败照原样报回去即可：渲染层拿不到路径就用原图，画面不会
+/// 因为一份坏调色表黑掉。
+#[tauri::command]
+pub async fn lighting_lut_bake(req: BakeLutRequest) -> Result<String, String> {
+    let image_path = req.image_path.clone();
+    let baked = tauri::async_runtime::spawn_blocking(move || {
+        lighting_lut::bake(Path::new(&req.image_path), &req.lut_id, req.strength)
+    })
+    .await
+    .map_err(|e| format!("烘焙任务没跑起来：{e}"))?;
+
+    match baked {
+        Ok(path) => path
+            .to_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "缓存图路径不是合法文本".to_string()),
+        Err(e) => {
+            tracing::warn!("调色表烘焙失败，已退回原图: {e}（{}）", image_path);
+            Err(e)
+        },
+    }
 }

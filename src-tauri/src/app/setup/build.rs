@@ -176,6 +176,8 @@ pub(super) fn build_service_graph(
 
     // 自建光影预设：面板、剧本、AI 共用同一张表，所以必须在任何解析发生前读盘。
     ai_service::game_system::lighting_store::load_user_presets(&api::data_dir());
+    // 导入的调色表（PS 的 .cube）同理：渲染层拿 id 查不到就会静默不调色。
+    ai_service::game_system::lighting_lut::load_library(&api::data_dir());
 
     // 插件系统：确保 data/plugins 目录存在并扫描加载插件（工具注册进 registry）。
     let plugin_manager = {

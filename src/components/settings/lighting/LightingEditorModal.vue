@@ -206,6 +206,7 @@ import { applyLighting, clearLighting, saveLightingPreset } from "../../../api/s
 import type { LightingParams } from "../../../api/services/scene";
 import { useGameStore } from "../../../stores/modules/game";
 import { useLightingStore } from "../../../stores/modules/lighting";
+import { useLightingLutStore } from "../../../stores/modules/lighting/lut";
 import { useUIStore } from "../../../stores/modules/ui/ui";
 import { useDialogStore } from "../../../stores/modules/ui/dialog";
 import { EMOTION_CONFIG_EMO } from "../../../controllers/emotion/config";
@@ -224,7 +225,10 @@ const { t } = useI18n();
 const gameStore = useGameStore();
 const uiStore = useUIStore();
 const lightingStore = useLightingStore();
+const lightingLut = useLightingLutStore();
 const dialogStore = useDialogStore();
+// 草稿里挂的调色表要先在库里查得到才能预览，所以进编辑器就取一次列表。
+void lightingLut.ensureLoaded();
 
 const L = "settings.background.lighting.editor";
 
@@ -298,7 +302,10 @@ const bgSrc = computed(() => {
   ) {
     return bg || "";
   }
-  return convertFileSrc(bg);
+  // 预览要看的是草稿里那张表的效果，而不是屏幕上正在用的，所以显式传草稿参数。
+  return convertFileSrc(
+    lightingLut.displayPath(bg, lightingLut.resolve(draft.color_lut, draft.color_lut_strength)),
+  );
 });
 
 /**
@@ -311,10 +318,21 @@ const neutralBackdrop: CSSProperties = {
     "linear-gradient(158deg, #7f90a8 0%, #47516600 52%)," +
     "linear-gradient(158deg, #475166 0%, #1a1f29 100%)",
 };
-const avatarSrc = ref("");
+const avatarPath = ref("");
+/** 立绘 URL 由路径现算，这样换调色表 / 烘焙完成都会自动跟上。 */
+const avatarSrc = computed(() =>
+  avatarPath.value
+    ? convertFileSrc(
+        lightingLut.displayPath(
+          avatarPath.value,
+          lightingLut.resolve(draft.color_lut, draft.color_lut_strength),
+        ),
+      )
+    : "",
+);
 
 async function resolveAvatar() {
-  avatarSrc.value = "";
+  avatarPath.value = "";
   const roleId = gameStore.currentInteractRoleId;
   const role = roleId ? gameStore.gameRoles[roleId] : null;
   if (!role) return;
@@ -326,9 +344,9 @@ async function resolveAvatar() {
       emotion: EMOTION_CONFIG_EMO[role.emotion] || "正常",
       clothesName,
     });
-    avatarSrc.value = convertFileSrc(path);
+    avatarPath.value = path;
   } catch {
-    avatarSrc.value = "";
+    avatarPath.value = "";
   }
 }
 
@@ -375,6 +393,8 @@ function revert() {
 }
 async function close() {
   clearTimeout(timer);
+  // 「显示调色前」只是编辑器里看一眼的临时状态，留着关掉窗口会让主画面的调色凭空消失。
+  lightingLut.compareOriginal = false;
   if (savedFlag) {
     emit("close");
     return;

@@ -90,3 +90,44 @@ export async function saveLightingPreset(req: SaveLightingPresetReq): Promise<Li
 export async function deleteLightingPreset(id: string): Promise<void> {
   await invoke("lighting_preset_delete", { id });
 }
+
+// ===== 调色表：Photoshop「导出颜色查找表」的 .cube =====
+
+/** 一份已导入的调色表。`size` 就是 PS 导出对话框里的「品质 / 网格点」。 */
+export interface LutInfo {
+  id: string;
+  name: string;
+  size: number;
+  importedAt: number;
+}
+
+export async function listLightingLuts(): Promise<LutInfo[]> {
+  return invoke<LutInfo[]>("lighting_lut_list");
+}
+
+/** 从磁盘上的 .cube 导入；校验不过时后端返回中文原因，面板原样显示。 */
+export async function importLightingLut(req: {
+  path: string;
+  name?: string | null;
+}): Promise<LutInfo> {
+  return invoke<LutInfo>("lighting_lut_import", {
+    req: { path: req.path, name: req.name ?? null },
+  });
+}
+
+export async function deleteLightingLut(id: string): Promise<void> {
+  await invoke("lighting_lut_delete", { id });
+}
+
+/**
+ * 把调色表烘进一张静态图，返回缓存图的路径。
+ *
+ * 后端按「原图 + 调色表 + 强度」做哈希缓存，所以同一个组合只会真的算一次。
+ */
+export async function bakeLightingLut(req: {
+  imagePath: string;
+  lutId: string;
+  strength: number;
+}): Promise<string> {
+  return invoke<string>("lighting_lut_bake", { req });
+}

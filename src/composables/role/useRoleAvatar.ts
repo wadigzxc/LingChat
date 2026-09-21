@@ -13,9 +13,10 @@
  * 真正还需要模式区分的只剩「等谁加载完」——主界面是 Live2D/静态呈现层，
  * 桌宠是 ImageCrossFade ——由 waitForAvatarLoad 注入。
  */
-import { ref, watch, nextTick, onUnmounted, type Ref } from "vue";
+import { ref, computed, watch, nextTick, onUnmounted, type Ref, type ComputedRef } from "vue";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { useGameStore } from "@/stores/modules/game";
+import { useLightingLutStore } from "@/stores/modules/lighting/lut";
 import { useUIStore } from "@/stores/modules/ui/ui";
 import { EMOTION_CONFIG, EMOTION_CONFIG_EMO } from "@/controllers/emotion/config";
 import type { GameRole } from "@/stores/modules/game/state";
@@ -37,8 +38,8 @@ export interface UseRoleAvatarOptions {
 }
 
 export interface UseRoleAvatarApi {
-  /** 当前情绪对应的头像图片 URL（已 convertFileSrc） */
-  targetAvatarUrl: Ref<string>;
+  /** 当前情绪对应的头像图片 URL（已 convertFileSrc，并按需套上调色表） */
+  targetAvatarUrl: ComputedRef<string>;
   /** 待机/情绪动画类名，如 "normal" / "happy-bounce" */
   activeAnimationClass: Ref<string>;
   isBubbleVisible: Ref<boolean>;
@@ -71,8 +72,13 @@ export function useRoleAvatar(options: UseRoleAvatarOptions): UseRoleAvatarApi {
 
   const gameStore = useGameStore();
   const uiStore = useUIStore();
+  const lightingLut = useLightingLutStore();
 
-  const targetAvatarUrl = ref("");
+  /** 头像文件本身的路径；URL 由它现算，换调色表 / 烘焙完成都会自动重算。 */
+  const avatarPath = ref("");
+  const targetAvatarUrl = computed(() =>
+    avatarPath.value ? convertFileSrc(lightingLut.displayPath(avatarPath.value)) : "",
+  );
   const activeAnimationClass = ref("normal");
   const isBubbleVisible = ref(false);
   const currentBubbleImageUrl = ref("");
@@ -85,14 +91,15 @@ export function useRoleAvatar(options: UseRoleAvatarOptions): UseRoleAvatarApi {
 
   async function resolveAvatar() {
     const currentId = ++resolveAvatarId;
+    void lightingLut.ensureLoaded();
     try {
       const path = await invoke<string>("get_avatar_file", avatarFolderParams(role.value));
       if (currentId === resolveAvatarId) {
-        targetAvatarUrl.value = convertFileSrc(path);
+        avatarPath.value = path;
       }
     } catch {
       if (currentId === resolveAvatarId) {
-        targetAvatarUrl.value = "";
+        avatarPath.value = "";
       }
     }
   }

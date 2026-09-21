@@ -60,6 +60,12 @@ export interface LightingParams {
   breathing_period?: number;
   /** 呼吸幅度 0–1 */
   breathing_amount?: number;
+
+  // ---------- 调色表 ----------
+  /** 已导入的 .cube 调色表 id；null / 缺省 = 不做调色 */
+  color_lut?: string | null;
+  /** 调色强度 0–1，与未调色的原图混合 */
+  color_lut_strength?: number;
 }
 
 export interface SceneInfo {
