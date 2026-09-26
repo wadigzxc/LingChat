@@ -19,6 +19,9 @@ pub struct SceneInfo {
     pub scene_description: String,
     pub background: Option<String>,
     pub lighting: Option<LightingParams>,
+    pub lighting_preset_id: Option<String>,
+    pub lighting_preset_revision: Option<u32>,
+    pub lighting_customized: bool,
     pub created_at: String,
     pub updated_at: String,
     /// 来源："game" 或提供该场景背景图的插件 id（插件场景写入 scenes.json，带 plugin_id 标签）。
@@ -36,6 +39,12 @@ pub struct CreateSceneRequest {
     pub background: String,
     #[serde(default)]
     pub lighting: Option<LightingParams>,
+    #[serde(default)]
+    pub lighting_preset_id: Option<String>,
+    #[serde(default)]
+    pub lighting_preset_revision: Option<u32>,
+    #[serde(default)]
+    pub lighting_customized: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +55,12 @@ pub struct UpdateSceneRequest {
     pub background: String,
     #[serde(default)]
     pub lighting: Option<LightingParams>,
+    #[serde(default)]
+    pub lighting_preset_id: Option<String>,
+    #[serde(default)]
+    pub lighting_preset_revision: Option<u32>,
+    #[serde(default)]
+    pub lighting_customized: bool,
 }
 
 // ========== Helpers ==========
@@ -95,6 +110,9 @@ pub(crate) fn model_to_info(s: &Scene) -> SceneInfo {
         scene_description: s.description.clone(),
         background: if bg.is_empty() { None } else { Some(bg) },
         lighting: s.lighting.clone(),
+        lighting_preset_id: s.lighting_preset_id.clone(),
+        lighting_preset_revision: s.lighting_preset_revision,
+        lighting_customized: s.lighting_customized,
         created_at: s.created_at.clone(),
         updated_at: s.updated_at.clone(),
         source: s.plugin_id.clone().unwrap_or_else(|| "game".to_string()),
@@ -160,6 +178,9 @@ pub async fn list_scenes(_app: AppHandle) -> Result<Vec<SceneInfo>, String> {
                     description: String::new(),
                     background: file_name.clone(),
                     lighting: None,
+                    lighting_preset_id: None,
+                    lighting_preset_revision: None,
+                    lighting_customized: false,
                     created_at: now.clone(),
                     updated_at: now,
                     plugin_id: None,
@@ -192,6 +213,9 @@ pub async fn create_scene(_app: AppHandle, req: CreateSceneRequest) -> Result<Sc
         description: req.scene_description,
         background: to_background_filename(&req.background),
         lighting: req.lighting,
+        lighting_preset_id: req.lighting_preset_id,
+        lighting_preset_revision: req.lighting_preset_revision,
+        lighting_customized: req.lighting_customized,
         created_at: now.clone(),
         updated_at: now,
         plugin_id: None,
@@ -220,6 +244,9 @@ pub async fn update_scene(_app: AppHandle, req: UpdateSceneRequest) -> Result<Sc
     scenes[idx].description = req.scene_description;
     scenes[idx].background = to_background_filename(&req.background);
     scenes[idx].lighting = req.lighting;
+    scenes[idx].lighting_preset_id = req.lighting_preset_id;
+    scenes[idx].lighting_preset_revision = req.lighting_preset_revision;
+    scenes[idx].lighting_customized = req.lighting_customized;
     scenes[idx].updated_at = now_iso();
 
     let info = model_to_info(&scenes[idx]);

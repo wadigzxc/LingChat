@@ -29,6 +29,9 @@ export interface SceneInfo {
   scene_description: string;
   background: string | null;
   lighting: LightingParams | null;
+  lighting_preset_id: string | null;
+  lighting_preset_revision: number | null;
+  lighting_customized: boolean;
   created_at: string;
   updated_at: string;
   /** 来源："game" 或提供该场景背景图的插件 id。 */
@@ -41,6 +44,9 @@ export interface CreateSceneRequest {
   scene_description: string;
   background: string;
   lighting?: LightingParams | null;
+  lighting_preset_id?: string | null;
+  lighting_preset_revision?: number | null;
+  lighting_customized?: boolean;
 }
 
 export interface UpdateSceneRequest {
@@ -49,6 +55,9 @@ export interface UpdateSceneRequest {
   scene_description: string;
   background: string;
   lighting?: LightingParams | null;
+  lighting_preset_id?: string | null;
+  lighting_preset_revision?: number | null;
+  lighting_customized?: boolean;
 }
 
 export async function listScenes(): Promise<SceneInfo[]> {
