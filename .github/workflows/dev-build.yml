@@ -16,7 +16,27 @@ on:
   workflow_dispatch:
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/setup@v1
+        with:
+          runtime: node@26
+          cache: true
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 前端测试
+        run: pnpm test
+
+      - name: 前端构建
+        run: pnpm build
+
   build:
+    needs: quality
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
