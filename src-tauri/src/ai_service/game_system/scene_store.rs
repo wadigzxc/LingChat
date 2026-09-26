@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::utils::atomic_file::atomic_replace_file;
+
 #[allow(unused_imports)]
 pub use super::lighting::{
     AmbientParams, AssetFit, AssetPlacement, BlendMode, BloomParams, FilterParams, LightShape,
@@ -64,8 +66,8 @@ impl SceneStore {
 
     pub fn save_all(&self, scenes: &[Scene]) -> Result<()> {
         self.ensure_dir()?;
-        let content = serde_json::to_string_pretty(scenes)?;
-        std::fs::write(&self.path, content)
+        let content = serde_json::to_vec_pretty(scenes)?;
+        atomic_replace_file(&self.path, &content)
             .with_context(|| format!("写入场景文件失败: {:?}", self.path))?;
         Ok(())
     }
