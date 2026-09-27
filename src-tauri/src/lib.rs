@@ -891,6 +891,8 @@ pub fn run() {
             api::lighting_archive::r#import::inspect_linglight,
             api::lighting_archive::r#import::commit_linglight_import,
             api::lighting_archive::r#import::cancel_linglight_import,
+            api::lighting_archive::export::export_linglight,
+            api::lighting_archive::export::export_linglights,
             // 本地 TTS 相关命令
             ai_service::tts::local::tts_local_status,
             ai_service::tts::local::tts_local_list_catalog,
