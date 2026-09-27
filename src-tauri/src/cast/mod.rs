@@ -401,12 +401,53 @@ pub async fn cast_get_snapshot(app: AppHandle) -> Result<serde_json::Value, Stri
 /// 把主窗口「当前正在显示的台词」经本中继存储并广播给投屏窗口——
 /// 投屏窗口与主窗口是各自独立的 webview/事件队列，若投屏自己消费 ai:reply
 /// 就会「按消息到达时间显示」而非与主界面逐句同步。经镜像后投屏完全跟随主窗口。
+fn enrich_mirror_with_runtime_lighting(
+    mut mirror: serde_json::Value,
+    runtime: &crate::ai_service::game_system::scene_transition::SceneRuntimeState,
+) -> Result<serde_json::Value, String> {
+    let object = mirror
+        .as_object_mut()
+        .ok_or_else(|| "投屏镜像必须是 JSON 对象".to_string())?;
+    object.insert(
+        "activeLighting".into(),
+        serde_json::to_value(&runtime.active_lighting).map_err(|error| error.to_string())?,
+    );
+    object.insert(
+        "activeLightingSource".into(),
+        serde_json::to_value(runtime.source).map_err(|error| error.to_string())?,
+    );
+    object.insert(
+        "activeLightingPresetId".into(),
+        serde_json::to_value(&runtime.preset_id).map_err(|error| error.to_string())?,
+    );
+    object.insert(
+        "activeLightingPresetRevision".into(),
+        serde_json::to_value(runtime.preset_revision).map_err(|error| error.to_string())?,
+    );
+    object.insert(
+        "activeLightingCustomized".into(),
+        serde_json::Value::Bool(runtime.customized),
+    );
+    object.insert(
+        "lightingRevision".into(),
+        serde_json::Value::Number(runtime.lighting_revision.into()),
+    );
+    Ok(mirror)
+}
+
 #[tauri::command]
 pub async fn cast_emit_mirror(
     app: AppHandle,
     state: State<'_, CastManager>,
     mirror: serde_json::Value,
 ) -> Result<(), String> {
+    let runtime = {
+        let app_state = app.state::<crate::AppState>();
+        let service = app_state.ai_service.lock().await;
+        let runtime = service.game_status.lock().await.scene_runtime_state();
+        runtime
+    };
+    let mirror = enrich_mirror_with_runtime_lighting(mirror, &runtime)?;
     {
         let mut stored = state.mirror.lock().map_err(|e| format!("锁失败: {e}"))?;
         *stored = Some(mirror.clone());
@@ -434,4 +475,33 @@ pub async fn cast_get_mirror(
 #[tauri::command]
 pub async fn cast_play_voice(audio_file: String) -> Result<(), String> {
     server::broadcast_voice_play(&audio_file).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai_service::game_system::scene_transition::{
+        SceneLightingSource, SceneRuntimeState,
+    };
+
+    #[test]
+    fn mirror_uses_authoritative_runtime_lighting_metadata() {
+        let mut runtime = SceneRuntimeState::neutral(17);
+        runtime.source = SceneLightingSource::ManualPreset;
+        runtime.preset_id = Some("user:current".into());
+        runtime.preset_revision = Some(2);
+        let mirror = serde_json::json!({
+            "activeLightingSource": "stale",
+            "lightingRevision": 1,
+            "line": { "text": "hello" }
+        });
+
+        let enriched = enrich_mirror_with_runtime_lighting(mirror, &runtime).unwrap();
+
+        assert_eq!(enriched["activeLightingSource"], "manual_preset");
+        assert_eq!(enriched["activeLightingPresetId"], "user:current");
+        assert_eq!(enriched["activeLightingPresetRevision"], 2);
+        assert_eq!(enriched["lightingRevision"], 17);
+        assert_eq!(enriched["line"]["text"], "hello");
+    }
 }

@@ -317,11 +317,20 @@ pub async fn get_tts_cache_info(app: AppHandle) -> Result<serde_json::Value, Str
     }))
 }
 
+pub(crate) fn should_restore_startup_scene(
+    runtime: &crate::ai_service::game_system::scene_transition::SceneRuntimeState,
+) -> bool {
+    runtime.lighting_revision == 0
+}
+
 #[tauri::command]
 pub async fn init_game(app: AppHandle) -> Result<WebInitData, String> {
     let state = app.state::<AppState>();
     let service = state.ai_service.lock().await;
-    super::scene::restore_startup_scene_selection(&app, &service).await?;
+    let runtime = service.game_status.lock().await.scene_runtime_state();
+    if should_restore_startup_scene(&runtime) {
+        super::scene::restore_startup_scene_selection(&app, &service).await?;
+    }
     build_web_init_data(&service, &app).await
 }
 

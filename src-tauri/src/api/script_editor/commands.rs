@@ -1524,6 +1524,8 @@ pub struct PreviewSession {
     generation: u64,
     /// `to_snapshot()` 覆盖的场景状态：背景 / 音乐 / 特效 / 在场角色 / 全局变量 …
     scene: crate::ai_service::game_system::game_status::GameStatusSnapshot,
+    /// 临时运行时光影不属于普通存档快照，必须独立备份。
+    lighting: crate::api::scene_lighting::PreviewRuntimeLightingBackup,
     /// 快照没覆盖的三个字段
     main_role_id: Option<i32>,
     current_role_id: Option<i32>,
@@ -1554,6 +1556,9 @@ impl PreviewSession {
             line_len: gs.line_list.len(),
             generation,
             scene: gs.to_snapshot(),
+            lighting: crate::api::scene_lighting::PreviewRuntimeLightingBackup::capture(
+                &gs.scene_runtime_state(),
+            ),
             main_role_id: gs.main_role_id,
             current_role_id: gs.current_role_id,
             script_status: gs.script_status.clone().map(Box::new),
@@ -1618,7 +1623,12 @@ impl PreviewSession {
 
     /// 尽力还原，任何一步失败都只记日志 —— 收尾阶段再抛错没有接收方，
     /// 而且半途放弃只会让残留更多。
-    async fn restore(self, db: &DatabaseConnection, game_status: &Arc<Mutex<GameStatus>>) {
+    async fn restore(
+        self,
+        db: &DatabaseConnection,
+        data_dir: &Path,
+        game_status: &Arc<Mutex<GameStatus>>,
+    ) -> Option<crate::ai_service::game_system::scene_transition::SceneStatePayload> {
         let mut gs = game_status.lock().await;
         // 递增试玩代号：让上一场被中止后仍在排空的游离流式任务捕获的旧代号
         // 立即过期，它们的迟到写入会被 add_assistant_line 的守卫丢弃，不再
@@ -1632,10 +1642,34 @@ impl PreviewSession {
         gs.script_status = self.script_status.map(|b| *b);
         gs.player.user_name = self.user_name;
         gs.player.user_subtitle = self.user_subtitle;
+
+        let current = gs.scene_runtime_state();
+        let scene = current.current_scene_id.as_deref().and_then(|id| {
+            crate::ai_service::game_system::scene_store::SceneStore::new(data_dir)
+                .find_by_id(id)
+                .ok()
+                .flatten()
+        });
+        let payload = match self.lighting.restore_transition(&current, scene) {
+            Ok(transition) => {
+                let payload =
+                    crate::ai_service::game_system::scene_transition::SceneStatePayload::from(
+                        &transition,
+                    );
+                gs.apply_scene_transition(&transition);
+                Some(payload)
+            },
+            Err(error) => {
+                tracing::warn!("[ScriptEditor] 还原试玩光影失败: {error}");
+                None
+            },
+        };
+
         // 台词表变短了，角色记忆要按新的列表重建，否则里面还留着试玩的内容
         if let Err(e) = gs.refresh_memories(db).await {
             tracing::warn!("[ScriptEditor] 还原后刷新记忆失败: {}", e);
         }
+        payload
     }
 }
 
@@ -1656,8 +1690,15 @@ async fn apply_pending_restore(app: &AppHandle) {
     };
     let state = app.state::<AppState>();
     let db = state.db.clone();
-    let game_status = state.ai_service.lock().await.game_status.clone();
-    session.restore(&db, &game_status).await;
+    let service = state.ai_service.lock().await;
+    let data_dir = service.data_dir.clone();
+    let game_status = service.game_status.clone();
+    drop(service);
+    if let Some(payload) = session.restore(&db, &data_dir, &game_status).await {
+        if let Err(error) = crate::api::scene::emit_scene_state(app, &payload) {
+            tracing::warn!("[ScriptEditor] 广播试玩光影还原失败: {error}");
+        }
+    }
 }
 
 /// 试玩时 `MAIN` 应该解析成谁。

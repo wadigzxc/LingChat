@@ -17,6 +17,7 @@ pub mod pet;
 pub mod plugins;
 pub mod save;
 pub mod scene;
+pub mod scene_lighting;
 pub mod schedule;
 pub mod screenshot;
 pub mod script;
