@@ -1,12 +1,18 @@
 use std::collections::HashSet;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::ai_service::game_system::scene_store::{LightingParams, Scene, SceneStore};
+use crate::ai_service::game_system::scene_transition::{
+    SceneSelection, SceneStatePayload, StoredSceneSelection, resolve_startup_selection,
+    restore_snapshot_scene, transition_scene_by_id, transition_scene_selection,
+};
+use crate::ai_service::service::AIService;
 use crate::api::data_dir;
 
 // ========== Response types ==========
@@ -124,78 +130,189 @@ fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-// ========== Tauri commands ==========
+pub(crate) fn load_synchronized_scenes() -> Result<Vec<Scene>, String> {
+    load_synchronized_scenes_from(&data_dir(), &super::backgrounds_dir())
+}
 
-#[tauri::command]
-pub async fn list_scenes(_app: AppHandle) -> Result<Vec<SceneInfo>, String> {
-    let store = SceneStore::new(&data_dir());
+fn load_synchronized_scenes_from(data_dir: &Path, bg_dir: &Path) -> Result<Vec<Scene>, String> {
+    let store = SceneStore::new(data_dir);
     let mut scenes = store
         .load_all()
-        .map_err(|e| format!("加载场景列表失败: {}", e))?;
-
-    // 自动将背景目录中未被注册为场景的图片注册为场景
-    let bg_dir = super::backgrounds_dir();
+        .map_err(|e| format!("加载场景列表失败: {e}"))?;
     let existing_bgs: HashSet<String> = scenes
         .iter()
         .map(|s| to_background_filename(&s.background))
         .filter(|b| !b.is_empty())
         .collect();
-
     let allowed = ["png", "jpg", "jpeg", "webp", "bmp", "svg", "tif", "gif"];
     let mut added = false;
 
-    if bg_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&bg_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-                let ext = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                if !allowed.contains(&ext.as_str()) {
-                    continue;
-                }
-                let file_name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                if existing_bgs.contains(&file_name) {
-                    continue;
-                }
-                // 自动注册：名称为文件名（不含后缀），仅存文件名
-                let name = path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let now = now_iso();
-                scenes.push(Scene {
-                    id: Uuid::new_v4().to_string(),
-                    name,
-                    description: String::new(),
-                    background: file_name.clone(),
-                    lighting: None,
-                    lighting_preset_id: None,
-                    lighting_preset_revision: None,
-                    lighting_customized: false,
-                    created_at: now.clone(),
-                    updated_at: now,
-                    plugin_id: None,
-                });
-                added = true;
+    if let Ok(entries) = std::fs::read_dir(bg_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
             }
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if !allowed.contains(&ext.as_str()) {
+                continue;
+            }
+            let file_name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if existing_bgs.contains(&file_name) {
+                continue;
+            }
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let now = now_iso();
+            scenes.push(Scene {
+                id: Uuid::new_v4().to_string(),
+                name,
+                description: String::new(),
+                background: file_name,
+                lighting: None,
+                lighting_preset_id: None,
+                lighting_preset_revision: None,
+                lighting_customized: false,
+                created_at: now.clone(),
+                updated_at: now,
+                plugin_id: None,
+            });
+            added = true;
         }
     }
 
     if added {
         store
             .save_all(&scenes)
-            .map_err(|e| format!("保存场景失败: {}", e))?;
+            .map_err(|e| format!("保存场景失败: {e}"))?;
     }
+    Ok(scenes)
+}
 
+fn persist_scene_selection(app: &AppHandle, scene_id: Option<&str>) -> Result<(), String> {
+    let store = app
+        .store(crate::config::STORE_FILE)
+        .map_err(|e| format!("打开会话存储失败: {e}"))?;
+    let value = scene_id
+        .map(|id| serde_json::Value::String(id.to_string()))
+        .unwrap_or(serde_json::Value::Null);
+    store.set(crate::config::session::LAST_SCENE_ID.to_string(), value);
+    store.save().map_err(|e| format!("保存上次场景失败: {e}"))
+}
+
+pub(crate) fn emit_scene_state(app: &AppHandle, payload: &SceneStatePayload) -> Result<(), String> {
+    app.emit("scene-state:changed", payload)
+        .map_err(|e| format!("广播场景状态失败: {e}"))
+}
+
+pub(crate) async fn apply_scene_selection_for_service(
+    app: &AppHandle,
+    service: &AIService,
+    scene: Option<&Scene>,
+) -> Result<SceneStatePayload, String> {
+    let selected = scene.cloned().map(|scene| {
+        let background = normalize_background(&scene.background);
+        SceneSelection::new(scene, background)
+    });
+    let gs = service.game_status.lock().await;
+    let transition = transition_scene_selection(&gs.scene_runtime_state(), selected)?;
+    drop(gs);
+    apply_scene_transition_for_service(app, service, transition).await
+}
+
+async fn apply_scene_transition_for_service(
+    app: &AppHandle,
+    service: &AIService,
+    transition: crate::ai_service::game_system::scene_transition::SceneTransition,
+) -> Result<SceneStatePayload, String> {
+    persist_scene_selection(app, transition.current_scene_id.as_deref())?;
+    let mut gs = service.game_status.lock().await;
+    gs.apply_scene_transition(&transition);
+    let payload = SceneStatePayload::from(&transition);
+    drop(gs);
+    emit_scene_state(app, &payload)?;
+    Ok(payload)
+}
+
+pub async fn apply_scene_selection(
+    app: &AppHandle,
+    scene: Option<&Scene>,
+) -> Result<SceneStatePayload, String> {
+    let state = app.state::<AppState>();
+    let service = state.ai_service.lock().await;
+    apply_scene_selection_for_service(app, &service, scene).await
+}
+
+pub async fn select_scene_by_id(
+    app: &AppHandle,
+    scene_id: Option<&str>,
+) -> Result<SceneStatePayload, String> {
+    let scenes = load_synchronized_scenes()?;
+    let state = app.state::<AppState>();
+    let service = state.ai_service.lock().await;
+    let runtime = service.game_status.lock().await.scene_runtime_state();
+    let transition = transition_scene_by_id(&runtime, &scenes, scene_id, |scene| {
+        normalize_background(&scene.background)
+    })?;
+    apply_scene_transition_for_service(app, &service, transition).await
+}
+
+pub(crate) async fn restore_startup_scene_selection(
+    app: &AppHandle,
+    service: &AIService,
+) -> Result<SceneStatePayload, String> {
+    let scenes = load_synchronized_scenes()?;
+    let current_id = service.game_status.lock().await.current_scene_id.clone();
+    let stored = if let Some(id) = current_id {
+        StoredSceneSelection::SceneId(id)
+    } else if let Ok(store) = app.store(crate::config::STORE_FILE) {
+        match store.get(crate::config::session::LAST_SCENE_ID) {
+            None => StoredSceneSelection::NeverSelected,
+            Some(value) if value.is_null() => StoredSceneSelection::ExplicitNone,
+            Some(value) => value
+                .as_str()
+                .map(|id| StoredSceneSelection::SceneId(id.to_string()))
+                .unwrap_or(StoredSceneSelection::ExplicitNone),
+        }
+    } else {
+        StoredSceneSelection::NeverSelected
+    };
+    let resolution = resolve_startup_selection(stored, &scenes);
+    let persist_correction = resolution.persist_correction;
+    let payload = apply_scene_selection_for_service(app, service, resolution.scene).await?;
+    if persist_correction {
+        tracing::info!("启动场景记录缺失或无效，已选择安全回退并修正持久化状态");
+    }
+    Ok(payload)
+}
+
+pub(crate) async fn restore_snapshot_scene_selection(
+    app: &AppHandle,
+    service: &AIService,
+    snapshot_scene_id: Option<&str>,
+) -> Result<SceneStatePayload, String> {
+    let scenes = load_synchronized_scenes()?;
+    let runtime = service.game_status.lock().await.scene_runtime_state();
+    let transition = restore_snapshot_scene(&runtime, snapshot_scene_id, &scenes, |scene| {
+        normalize_background(&scene.background)
+    })?;
+    apply_scene_transition_for_service(app, service, transition).await
+}
+
+// ========== Tauri commands ==========
+
+#[tauri::command]
+pub async fn list_scenes(_app: AppHandle) -> Result<Vec<SceneInfo>, String> {
+    let scenes = load_synchronized_scenes()?;
     Ok(scenes.iter().map(|s| model_to_info(s)).collect())
 }
 
@@ -253,6 +370,12 @@ pub async fn update_scene(_app: AppHandle, req: UpdateSceneRequest) -> Result<Sc
     store
         .save_all(&scenes)
         .map_err(|e| format!("保存场景失败: {}", e))?;
+    let state = _app.state::<AppState>();
+    let service = state.ai_service.lock().await;
+    let is_current = service.game_status.lock().await.current_scene_id.as_deref() == Some(&req.id);
+    if is_current {
+        apply_scene_selection_for_service(&_app, &service, Some(&scenes[idx])).await?;
+    }
     Ok(info)
 }
 
@@ -300,12 +423,12 @@ pub async fn delete_scene(app: AppHandle, id: String) -> Result<(), String> {
         }
     }
 
-    // 若删除的是当前选中场景，清除引用
+    // 若删除的是当前选中场景，统一清空背景、光影、持久化 ID 并广播。
     let state = app.state::<AppState>();
     let service = state.ai_service.lock().await;
-    let mut gs = service.game_status.lock().await;
-    if gs.current_scene_id.as_deref() == Some(&id) {
-        gs.current_scene_id = None;
+    let is_current = service.game_status.lock().await.current_scene_id.as_deref() == Some(&id);
+    if is_current {
+        apply_scene_selection_for_service(&app, &service, None).await?;
     }
 
     Ok(())
@@ -313,21 +436,7 @@ pub async fn delete_scene(app: AppHandle, id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn select_scene(app: AppHandle, scene_id: Option<String>) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let service = state.ai_service.lock().await;
-    let mut gs = service.game_status.lock().await;
-    gs.current_scene_id = scene_id.clone();
-
-    // 持久化到 store，便于下次启动恢复
-    if let Ok(store) = app.store(crate::config::STORE_FILE) {
-        let val = match &scene_id {
-            Some(id) => serde_json::Value::String(id.clone()),
-            None => serde_json::Value::Null,
-        };
-        store.set(crate::config::session::LAST_SCENE_ID.to_string(), val);
-        let _ = store.save();
-    }
-
+    select_scene_by_id(&app, scene_id.as_deref()).await?;
     Ok(())
 }
 
@@ -348,4 +457,26 @@ pub async fn set_scene_awareness(app: AppHandle, enabled: bool) -> Result<(), St
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_and_ai_scene_lists_share_background_directory_synchronization() {
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = root.path().join("data");
+        let backgrounds_dir = root.path().join("backgrounds");
+        std::fs::create_dir_all(&backgrounds_dir).unwrap();
+        std::fs::write(backgrounds_dir.join("sky.png"), b"png fixture").unwrap();
+
+        let synchronized = load_synchronized_scenes_from(&data_dir, &backgrounds_dir).unwrap();
+        let ui_ids: Vec<_> = synchronized.iter().map(|scene| scene.id.as_str()).collect();
+        let ai_ids: Vec<_> = synchronized.iter().map(|scene| scene.id.as_str()).collect();
+
+        assert_eq!(ui_ids, ai_ids);
+        assert_eq!(synchronized.len(), 1);
+        assert_eq!(synchronized[0].background, "sky.png");
+    }
 }

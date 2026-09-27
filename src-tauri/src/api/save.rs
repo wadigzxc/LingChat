@@ -255,9 +255,15 @@ pub async fn load_save(app: AppHandle, save_id: i32) -> Result<WebInitData, Stri
         .await
         .map_err(|e| format!("载入台词失败: {}", e))?;
 
-    // 9. 恢复 GameStatus 快照
+    // 9. 恢复持久化字段；运行时光影不在快照中，始终按场景快照重算。
     let snapshot: GameStatusSnapshot = serde_json::from_str(&save_model.status).unwrap_or_default();
     service.game_status.lock().await.apply_snapshot(&snapshot);
+    crate::api::scene::restore_snapshot_scene_selection(
+        &app,
+        &service,
+        snapshot.current_scene_id.as_deref(),
+    )
+    .await?;
 
     // 10. 恢复剧本状态（若有）
     if let Some(rs_id) = save_model.running_script_id {

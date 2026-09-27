@@ -7,7 +7,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
 use crate::AppState;
-use crate::ai_service::game_system::scene_store::SceneStore;
+use crate::ai_service::game_system::scene_store::{LightingParams, SceneStore};
+use crate::ai_service::game_system::scene_transition::SceneLightingSource;
 use crate::ai_service::message_system::events;
 use crate::ai_service::message_system::generator::{
     GeneratorDeps, GeneratorSource, MessageGenerator,
@@ -34,6 +35,12 @@ pub struct WebInitData {
     pub background_music: String,
     pub current_scene_id: Option<String>,
     pub current_scene: Option<super::scene::SceneInfo>,
+    pub active_lighting: LightingParams,
+    pub active_lighting_source: SceneLightingSource,
+    pub active_lighting_preset_id: Option<String>,
+    pub active_lighting_preset_revision: Option<u32>,
+    pub active_lighting_customized: bool,
+    pub lighting_revision: u64,
     /// 在场角色的设定（含主角与非主角），前端据此初始化 gameRoles 与 presentRoleIds
     pub onstage_roles: Vec<CharacterSettingsInit>,
     /// 初始化台词列表（至少包含一条 system 人设台词）
@@ -314,6 +321,7 @@ pub async fn get_tts_cache_info(app: AppHandle) -> Result<serde_json::Value, Str
 pub async fn init_game(app: AppHandle) -> Result<WebInitData, String> {
     let state = app.state::<AppState>();
     let service = state.ai_service.lock().await;
+    super::scene::restore_startup_scene_selection(&app, &service).await?;
     build_web_init_data(&service, &app).await
 }
 
@@ -355,6 +363,7 @@ pub async fn select_character(app: AppHandle, character_id: i32) -> Result<WebIn
     //    drop 后再拿锁，避免同一个锁两次借用
     let init = {
         let service = state.ai_service.lock().await;
+        super::scene::restore_startup_scene_selection(&app, &service).await?;
         build_web_init_data(&service, &app).await?
     };
     Ok(init)
@@ -382,6 +391,7 @@ pub async fn clear_conversation(app: AppHandle) -> Result<WebInitData, String> {
 
     let init = {
         let service = state.ai_service.lock().await;
+        super::scene::restore_startup_scene_selection(&app, &service).await?;
         build_web_init_data(&service, &app).await?
     };
     Ok(init)
@@ -435,6 +445,12 @@ pub(crate) async fn build_web_init_data(
         background_effect,
         background_music,
         scene_awareness_enabled,
+        active_lighting,
+        active_lighting_source,
+        active_lighting_preset_id,
+        active_lighting_preset_revision,
+        active_lighting_customized,
+        lighting_revision,
     ) = {
         let mut gs = service.game_status.lock().await;
         let seqs = compute_user_message_seqs(&gs.line_list);
@@ -458,43 +474,7 @@ pub(crate) async fn build_web_init_data(
             })
             .collect();
 
-        let mut sid = gs.current_scene_id.clone();
-
-        // 若无当前场景，尝试从 store 恢复上次选择的场景
-        if sid.is_none() {
-            if let Ok(store) = app.store(config::STORE_FILE) {
-                if let Some(v) = store.get(config::session::LAST_SCENE_ID) {
-                    if let Some(id) = v.as_str() {
-                        sid = Some(id.to_string());
-                    }
-                }
-            }
-        }
-
-        // 若仍无场景，随机选一个
-        if sid.is_none() {
-            let store = SceneStore::new(&service.data_dir);
-            if let Ok(scenes) = store.load_all() {
-                if !scenes.is_empty() {
-                    let idx = chrono::Utc::now().timestamp_subsec_nanos() as usize % scenes.len();
-                    sid = Some(scenes[idx].id.clone());
-                }
-            }
-        }
-
-        // 若恢复了场景，更新 GameStatus
-        if sid != gs.current_scene_id {
-            gs.current_scene_id = sid.clone();
-            if let Some(ref scene_id) = sid {
-                let store = SceneStore::new(&service.data_dir);
-                if let Ok(Some(scene)) = store.find_by_id(scene_id) {
-                    let bg = super::scene::normalize_background(&scene.background);
-                    if !bg.is_empty() {
-                        gs.background = bg;
-                    }
-                }
-            }
-        }
+        let sid = gs.current_scene_id.clone();
 
         // 从 store 恢复场景感知开关
         if let Ok(store) = app.store(config::STORE_FILE) {
@@ -528,6 +508,12 @@ pub(crate) async fn build_web_init_data(
             gs.background_effect.clone(),
             gs.background_music.clone(),
             scene_awareness,
+            gs.active_lighting.clone(),
+            gs.active_lighting_source,
+            gs.active_lighting_preset_id.clone(),
+            gs.active_lighting_preset_revision,
+            gs.active_lighting_customized,
+            gs.lighting_revision,
         )
     };
 
@@ -576,6 +562,12 @@ pub(crate) async fn build_web_init_data(
         background_music,
         current_scene_id,
         current_scene,
+        active_lighting,
+        active_lighting_source,
+        active_lighting_preset_id,
+        active_lighting_preset_revision,
+        active_lighting_customized,
+        lighting_revision,
         lines,
         scene_awareness_enabled,
         last_bgm_track,

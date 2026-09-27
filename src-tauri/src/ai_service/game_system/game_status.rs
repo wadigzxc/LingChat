@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::ai_service::game_system::role_manager::GameRoleManager;
+use crate::ai_service::game_system::scene_store::LightingParams;
+use crate::ai_service::game_system::scene_transition::{
+    SceneLightingSource, SceneRuntimeState, SceneTransition,
+};
 use crate::ai_service::types::{
     GameLine, GameRole, LineAttributeExt, LineBase, Player, ScriptStatus,
 };
@@ -39,6 +43,12 @@ pub struct GameStatus {
     pub current_scene_id: Option<String>,
     /// 上一次 process_message 处理时的场景 ID，用于检测场景切换
     pub last_processed_scene_id: Option<String>,
+    pub active_lighting: LightingParams,
+    pub active_lighting_source: SceneLightingSource,
+    pub active_lighting_preset_id: Option<String>,
+    pub active_lighting_preset_revision: Option<u32>,
+    pub active_lighting_customized: bool,
+    pub lighting_revision: u64,
 
     pub global_variables: HashMap<String, Value>,
     pub completed_scripts: HashSet<String>,
@@ -80,6 +90,12 @@ impl GameStatus {
             background_effect: String::new(),
             current_scene_id: None,
             last_processed_scene_id: None,
+            active_lighting: LightingParams::default(),
+            active_lighting_source: SceneLightingSource::Neutral,
+            active_lighting_preset_id: None,
+            active_lighting_preset_revision: None,
+            active_lighting_customized: false,
+            lighting_revision: 0,
             global_variables: HashMap::new(),
             completed_scripts: HashSet::new(),
             last_dialog_time: None,
@@ -222,6 +238,30 @@ impl GameStatus {
         self.role_manager.reactivate_all_voice_makers();
     }
 
+    pub fn scene_runtime_state(&self) -> SceneRuntimeState {
+        SceneRuntimeState {
+            current_scene_id: self.current_scene_id.clone(),
+            background: self.background.clone(),
+            active_lighting: self.active_lighting.clone(),
+            source: self.active_lighting_source,
+            preset_id: self.active_lighting_preset_id.clone(),
+            preset_revision: self.active_lighting_preset_revision,
+            customized: self.active_lighting_customized,
+            lighting_revision: self.lighting_revision,
+        }
+    }
+
+    pub fn apply_scene_transition(&mut self, transition: &SceneTransition) {
+        self.current_scene_id = transition.current_scene_id.clone();
+        self.background = transition.background.clone();
+        self.active_lighting = transition.active_lighting.clone();
+        self.active_lighting_source = transition.source;
+        self.active_lighting_preset_id = transition.preset_id.clone();
+        self.active_lighting_preset_revision = transition.preset_revision;
+        self.active_lighting_customized = transition.customized;
+        self.lighting_revision = transition.lighting_revision;
+    }
+
     // ============ 存档状态快照 ============
 
     /// 将当前 GameStatus 中需要持久化的字段导出为可序列化的快照
@@ -292,4 +332,20 @@ fn default_background_music() -> String {
 }
 fn default_background_effect() -> String {
     "none".into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_snapshot_excludes_runtime_lighting_state() {
+        let value = serde_json::to_value(GameStatusSnapshot::default()).unwrap();
+        let object = value.as_object().unwrap();
+
+        assert!(!object.contains_key("active_lighting"));
+        assert!(!object.contains_key("active_lighting_source"));
+        assert!(!object.contains_key("active_lighting_preset_id"));
+        assert!(!object.contains_key("lighting_revision"));
+    }
 }
