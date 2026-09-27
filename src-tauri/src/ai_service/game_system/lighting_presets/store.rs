@@ -15,6 +15,8 @@ use crate::utils::atomic_file::atomic_replace_file;
 pub struct LightingPresetStore {
     path: PathBuf,
     mutation_lock: Mutex<()>,
+    #[cfg(test)]
+    fail_next_save: std::sync::atomic::AtomicBool,
 }
 
 impl LightingPresetStore {
@@ -22,7 +24,30 @@ impl LightingPresetStore {
         Self {
             path: data_dir.join("game_data").join("lighting_presets.json"),
             mutation_lock: Mutex::new(()),
+            #[cfg(test)]
+            fail_next_save: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Runs an import mutation while holding the same lock as CRUD operations.
+    /// The callback may stage content-addressed assets, but the preset JSON save
+    /// remains the sole visibility commit point.
+    pub(crate) async fn import_transaction<F>(&self, operation: F) -> Result<LightingPreset>
+    where
+        F: FnOnce(&mut Vec<LightingPreset>, &[LightingPreset]) -> Result<LightingPreset>,
+    {
+        let _guard = self.mutation_lock.lock().await;
+        let mut users = self.load_users()?;
+        let builtins = builtin_presets();
+        let imported = operation(&mut users, &builtins)?;
+        self.save_users(&users)?;
+        Ok(imported)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_save_for_test(&self) {
+        self.fail_next_save
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub async fn create(&self, draft: LightingPresetDraft) -> Result<LightingPreset> {
@@ -138,6 +163,13 @@ impl LightingPresetStore {
     }
 
     fn save_users(&self, users: &[LightingPreset]) -> Result<()> {
+        #[cfg(test)]
+        if self
+            .fail_next_save
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            bail!("injected preset save failure");
+        }
         let parent = self.path.parent().context("光影预设路径没有父目录")?;
         std::fs::create_dir_all(parent)?;
         atomic_replace_file(&self.path, &serde_json::to_vec_pretty(users)?)

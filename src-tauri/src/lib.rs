@@ -298,6 +298,21 @@ pub fn run() {
             // 提前初始化数据目录缓存，以便在 init::initialize 之前
             // 将其传递给独立的本地 TTS crate。
             init::static_copy::init_data_dir(&app.handle());
+            app.manage(api::lighting_archive::LingLightImportState::default());
+            app.manage(
+                ai_service::game_system::lighting_presets::LightingPresetStore::new(
+                    &api::data_dir(),
+                ),
+            );
+            let import_cleanup_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    import_cleanup_app
+                        .state::<api::lighting_archive::LingLightImportState>()
+                        .cleanup_expired();
+                }
+            });
 
             // 管理各种状态
             app.manage(api::pet::HitTestState::default());
@@ -873,6 +888,9 @@ pub fn run() {
             api::role_archive::rescan_roles,
             api::role_archive::export_role,
             api::role_archive::export_role_to_path,
+            api::lighting_archive::r#import::inspect_linglight,
+            api::lighting_archive::r#import::commit_linglight_import,
+            api::lighting_archive::r#import::cancel_linglight_import,
             // 本地 TTS 相关命令
             ai_service::tts::local::tts_local_status,
             ai_service::tts::local::tts_local_list_catalog,
