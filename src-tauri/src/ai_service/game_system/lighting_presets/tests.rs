@@ -251,6 +251,28 @@ fn missing_preset_fields_use_compatible_defaults() {
 }
 
 #[test]
+fn builtin_presets_have_stable_chinese_and_english_aliases() {
+    let aliases = builtin_presets()
+        .into_iter()
+        .map(|preset| (preset.id, preset.aliases))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(aliases["builtin:neutral"], ["中性", "Neutral"]);
+    assert_eq!(
+        aliases["builtin:cold-backlight"],
+        ["冷色逆光", "Cold Backlight"]
+    );
+    assert_eq!(
+        aliases["builtin:warm-side"],
+        ["暖阳侧光", "Warm Side Light"]
+    );
+    assert_eq!(aliases["builtin:moonlight"], ["月夜", "Moonlight"]);
+    assert_eq!(
+        aliases["builtin:indoor-soft"],
+        ["室内柔光", "Indoor Soft Light"]
+    );
+}
+
+#[test]
 fn builtin_ids_are_unique_stable_and_normalized() {
     let presets = builtin_presets();
     let expected = [

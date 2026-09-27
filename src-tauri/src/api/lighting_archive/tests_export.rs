@@ -22,6 +22,7 @@ async fn exports_parameter_only_user_preset_and_round_trips() {
         .create(LightingPresetDraft {
             name: "Portable Neutral".into(),
             description: "portable".into(),
+            aliases: vec!["便携中性".into(), "Portable Neutral".into()],
             tags: vec!["soft".into()],
             category: "custom".into(),
             lighting: LightingParams::default(),
@@ -37,6 +38,7 @@ async fn exports_parameter_only_user_preset_and_round_trips() {
     let validated = validate_linglight(&result.path, ArchiveLimits::default()).unwrap();
 
     assert_eq!(validated.manifest.preset.name, preset.name);
+    assert_eq!(validated.manifest.preset.aliases, preset.aliases);
     assert_eq!(validated.manifest.preset.lighting, preset.lighting);
     assert_eq!(validated.manifest.origin.id, preset.origin_id.unwrap());
     assert!(validated.assets.is_empty());
@@ -63,6 +65,7 @@ async fn exports_png_and_preserves_asset_hash_on_round_trip() {
     let preset = store
         .create(LightingPresetDraft {
             name: "Mist".into(),
+            aliases: vec!["雾".into(), "Haze".into()],
             lighting,
             ..Default::default()
         })
@@ -102,6 +105,7 @@ async fn exports_png_and_preserves_asset_hash_on_round_trip() {
     .unwrap()
     .preset;
     assert_eq!(imported.origin_id, preset.origin_id);
+    assert_eq!(imported.aliases, preset.aliases);
     assert_eq!(imported.lighting.asset_layers[0].asset_hash, hash);
 }
 

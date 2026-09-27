@@ -138,6 +138,37 @@ fn manual_custom_preserves_preset_provenance() {
 }
 
 #[test]
+fn restoring_scene_uses_saved_default_lighting() {
+    let current = SceneRuntimeState {
+        current_scene_id: Some("scene-1".into()),
+        ..SceneRuntimeState::neutral(8)
+    };
+    let mut expected = LightingParams::default();
+    expected.master_intensity = 1.4;
+    let scene = crate::ai_service::game_system::scene_store::Scene {
+        id: "scene-1".into(),
+        name: "Scene".into(),
+        description: String::new(),
+        background: "background.png".into(),
+        lighting: Some(expected.clone()),
+        lighting_preset_id: Some("user:saved".into()),
+        lighting_preset_revision: Some(3),
+        lighting_customized: false,
+        created_at: "created".into(),
+        updated_at: "updated".into(),
+        plugin_id: None,
+    };
+
+    let transition = restore_runtime_lighting(&current, Some(scene)).unwrap();
+
+    assert_eq!(transition.active_lighting, expected);
+    assert_eq!(transition.source, SceneLightingSource::SceneDefault);
+    assert_eq!(transition.preset_id.as_deref(), Some("user:saved"));
+    assert_eq!(transition.preset_revision, Some(3));
+    assert_eq!(transition.lighting_revision, 9);
+}
+
+#[test]
 fn restoring_without_scene_keeps_background_and_uses_neutral_lighting() {
     let mut current = SceneRuntimeState::neutral(3);
     current.background = "script-background.png".into();

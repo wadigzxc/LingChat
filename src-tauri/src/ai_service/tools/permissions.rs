@@ -431,3 +431,82 @@ const fn default_enabled() -> bool {
 fn is_false(b: &bool) -> bool {
     !b
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LIGHTING_TOOLS: [&str; 3] = ["lighting_list", "lighting_switch", "lighting_reset"];
+
+    fn permission_config(
+        scene_enabled: bool,
+        source_allows: bool,
+        role_allows: bool,
+    ) -> ToolPermissionConfig {
+        let tools = LIGHTING_TOOLS
+            .iter()
+            .map(|tool| (*tool).to_string())
+            .collect::<HashSet<_>>();
+        ToolPermissionConfig {
+            scene_mapping: HashMap::from([(GeneratorSourceKey::UserChat, "source".to_string())]),
+            scene_groups: HashMap::from([(
+                "source".to_string(),
+                ToolPermission {
+                    enabled: scene_enabled,
+                    tools: if source_allows {
+                        tools.clone()
+                    } else {
+                        HashSet::new()
+                    },
+                    all_tools: false,
+                },
+            )]),
+            role_groups: HashMap::from([(
+                "role".to_string(),
+                GroupPermission {
+                    enabled: true,
+                    tools: if role_allows {
+                        tools.clone()
+                    } else {
+                        HashSet::new()
+                    },
+                    all_tools: false,
+                    roles: HashSet::from(["Alice".to_string()]),
+                },
+            )]),
+            ..ToolPermissionConfig::default()
+        }
+    }
+
+    #[test]
+    fn lighting_tools_require_enabled_scene_source_and_role_intersection() {
+        let all_names = LIGHTING_TOOLS
+            .iter()
+            .map(|tool| (*tool).to_string())
+            .collect::<HashSet<_>>();
+
+        let allowed = permission_config(true, true, true).allowed_tools(
+            GeneratorSource::UserChat,
+            Some("Alice"),
+            &all_names,
+        );
+        assert_eq!(allowed, all_names);
+
+        for config in [
+            permission_config(false, true, true),
+            permission_config(true, false, true),
+            permission_config(true, true, false),
+        ] {
+            assert!(
+                config
+                    .allowed_tools(GeneratorSource::UserChat, Some("Alice"), &all_names)
+                    .is_empty()
+            );
+        }
+        assert!(
+            permission_config(true, true, true)
+                .allowed_tools(GeneratorSource::UserChat, Some("Unknown"), &all_names)
+                .is_empty()
+        );
+    }
+}

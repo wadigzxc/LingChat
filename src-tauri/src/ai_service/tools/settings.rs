@@ -47,7 +47,16 @@ pub const TOOL_GROUPS: &[(&str, &[&str])] = &[
         ],
     ),
     ("character", &["character_list", "character_switch"]),
-    ("scene", &["scene_list", "scene_switch"]),
+    (
+        "scene",
+        &[
+            "scene_list",
+            "scene_switch",
+            "lighting_list",
+            "lighting_switch",
+            "lighting_reset",
+        ],
+    ),
     ("status", &["status_get_current", "status_get_scene"]),
     ("clock", &["get_current_time"]),
     ("skills", &["list_skills", "read_skill"]),
@@ -382,6 +391,25 @@ impl SharedToolSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scene_group_controls_all_scene_and_lighting_tools() {
+        let tools = TOOL_GROUPS
+            .iter()
+            .find(|(group, _)| *group == "scene")
+            .unwrap()
+            .1;
+        assert_eq!(
+            tools,
+            &[
+                "scene_list",
+                "scene_switch",
+                "lighting_list",
+                "lighting_switch",
+                "lighting_reset",
+            ]
+        );
+    }
 
     #[test]
     fn web_search_readiness_allows_provider_managed_credentials() {

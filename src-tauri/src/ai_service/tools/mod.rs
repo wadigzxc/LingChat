@@ -33,7 +33,7 @@ use permissions::CONFIG_FILE_NAME;
 use permissions::ToolPermissionConfig;
 use read_media_file::ReadMediaFileTool;
 use registry::ToolRegistry;
-use scene::{SceneList, SceneSwitch};
+use scene::{LightingList, LightingReset, LightingSwitch, SceneList, SceneSwitch};
 use schedule::{AddTodo, DeleteTodo, GetAllSchedule, UpdateTodo};
 use settings::SharedToolSettings;
 #[cfg(desktop)]
@@ -111,6 +111,9 @@ pub fn built_in_registry(
     registry.register(Arc::new(SceneStatus))?;
     registry.register(Arc::new(SceneList))?;
     registry.register(Arc::new(SceneSwitch))?;
+    registry.register(Arc::new(LightingList))?;
+    registry.register(Arc::new(LightingSwitch))?;
+    registry.register(Arc::new(LightingReset))?;
     registry.register(Arc::new(CharacterList))?;
     registry.register(Arc::new(CharacterSwitch))?;
     registry.register(Arc::new(ListSkills))?;

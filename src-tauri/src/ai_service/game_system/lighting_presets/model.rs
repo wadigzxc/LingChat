@@ -39,6 +39,7 @@ pub struct LightingPreset {
     pub name: String,
     pub i18n_key: Option<String>,
     pub description: String,
+    #[serde(default)]
     pub aliases: Vec<String>,
     pub tags: Vec<String>,
     pub category: String,
