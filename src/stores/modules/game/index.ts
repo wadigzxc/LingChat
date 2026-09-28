@@ -7,4 +7,6 @@ export const useGameStore = defineStore("game", {
   state: () => state,
   getters: getters,
   actions: actions,
+  // Game/session state, including runtime lighting, is restored by Rust init/events only.
+  persist: false,
 });

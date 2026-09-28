@@ -1,4 +1,4 @@
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { eventQueue } from "../core/events/event-queue";
@@ -20,7 +20,29 @@ import {
 import { useDialogStore } from "../stores/modules/ui/dialog";
 import { useAsrStore } from "../stores/modules/settings/asr";
 import type { VadEvent } from "../api/services/asr";
-import type { SceneInfo } from "./services/scene";
+import type { SceneStatePayload } from "@/types/scene-lighting";
+
+export const TAURI_EVENTS = {
+  sceneStateChanged: "scene-state:changed",
+} as const;
+
+let sceneStateSubscription: Promise<UnlistenFn> | null = null;
+
+/** The listener is intentionally a one-line forwarder into the authoritative store action. */
+export function subscribeSceneStateChanged(): Promise<UnlistenFn> {
+  if (!sceneStateSubscription) {
+    sceneStateSubscription = listen<SceneStatePayload>(
+      TAURI_EVENTS.sceneStateChanged,
+      ({ payload }) => {
+        useGameStore().applySceneState(payload);
+      }
+    );
+  }
+  return sceneStateSubscription.then((unlisten) => () => {
+    unlisten();
+    sceneStateSubscription = null;
+  });
+}
 
 function asEvent(
   payload: unknown,
@@ -58,6 +80,7 @@ function isStalePreviewReply(payload: Record<string, unknown>): boolean {
 export function initializeTauriEventListeners() {
   const currentWindow = getCurrentWindow();
   const mainWindow = currentWindow.label === "main" ? currentWindow : null;
+  void subscribeSceneStateChanged();
 
   listen("ai:reply", (event) => {
     const payload = event.payload as Record<string, unknown>;
@@ -423,20 +446,7 @@ export function initializeTauriEventListeners() {
     uiStore.showCharacterSubtitle = role.roleSubTitle;
   });
 
-  // === LLM 场景工具事件 ===
-
-  listen("scene:switch", (event) => {
-    const payload = event.payload as { type: string; scene: SceneInfo };
-    console.log("[Tauri] scene:switch", payload);
-    const gameStore = useGameStore();
-    const uiStore = useUIStore();
-    gameStore.setCurrentScene(payload.scene);
-    uiStore.setCurrentBackground(payload.scene.background ?? "");
-  });
-
-  console.log(
-    "[Tauri] Event listeners initialized (ai + ai:thinking_progress + tts:cleanup + adventure + auto-save + 13 script events + character:switch + scene:switch)"
-  );
+  console.log("[Tauri] Event listeners initialized (ai + scene-state + script + character events)");
 }
 
 /**
@@ -446,10 +456,11 @@ export function initializeTauriEventListeners() {
  * 完全由主窗口的镜像事件（cast:mirror，见 App.vue）驱动——若这里也注册
  * ai:reply 等会驱动队列的监听，投屏就会「按消息到达时间显示」而与主界面
  * 脱节。这里只注册投屏需要的即时状态事件：
- * - scene:switch / character:switch：背景、场景光照、立绘即时同步
- * （其余场景状态由 CastWindow 的 2s 快照对账兜底）。
+ * - scene-state:changed / character:switch：权威场景光影与立绘即时同步
+ * （其余展示状态由 CastWindow 的镜像与 2s 快照对账兜底）。
  */
 export function initializeCastWindowListeners() {
+  void subscribeSceneStateChanged();
   listen("character:switch", async (event) => {
     const payload = event.payload as { type: string; roleId: number; characterName: string };
     const gameStore = useGameStore();
@@ -463,14 +474,6 @@ export function initializeCastWindowListeners() {
     uiStore.showCharacterSubtitle = role.roleSubTitle;
   });
 
-  listen("scene:switch", (event) => {
-    const payload = event.payload as { type: string; scene: SceneInfo };
-    const gameStore = useGameStore();
-    const uiStore = useUIStore();
-    gameStore.setCurrentScene(payload.scene);
-    uiStore.setCurrentBackground(payload.scene.background ?? "");
-  });
-
   // 投屏客户端麦克风经投屏 /ws 送到 Rust ASR，识别文本由这里注入对话。
   // 复用既有 asr-send 自定义事件 → GameDialog.onAsrAutoSend → send()（sendMessage）。
   // 仅投屏窗口注册此监听（主窗口不注册），保证每次识别恰好注入一次。
@@ -481,6 +484,6 @@ export function initializeCastWindowListeners() {
   });
 
   console.log(
-    "[Tauri] Cast window listeners initialized (scene:switch + character:switch + cast:mic:recognized)"
+    "[Tauri] Cast window listeners initialized (scene-state + character:switch + cast:mic:recognized)"
   );
 }

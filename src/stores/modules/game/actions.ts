@@ -7,6 +7,12 @@ import { useUIStore } from "../ui/ui";
 import { useSettingsStore } from "../settings";
 import type { SceneInfo } from "@/api/services/scene";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  applySceneStatePayload,
+  cloneLightingOrNeutral,
+  type SceneStateProjectionPayload,
+  type SceneStateMirror,
+} from "@/utils/scene-lighting/scene-state";
 
 export const actions = {
   appendGameMessage(this: GameState, message: GameMessage) {
@@ -93,19 +99,26 @@ export const actions = {
     this.runningScript = null;
   },
 
-  // 设置当前场景（仅更新 store，不调用 API）
-  setCurrentScene(this: GameState, scene: SceneInfo | null) {
+  /** Legacy/local projection only. Authoritative runtime updates use applySceneState. */
+  applyCurrentScene(this: GameState, scene: SceneInfo | null) {
+    const uiStore = useUIStore();
     this.currentScene = scene;
+    uiStore.setCurrentBackground(scene?.background ?? "");
+    this.activeLighting = cloneLightingOrNeutral(scene?.lighting);
+    this.activeLightingSource = scene?.lighting ? "scene_default" : "neutral";
+    this.activeLightingPresetId = scene?.lighting_preset_id ?? null;
+    this.activeLightingPresetRevision = scene?.lighting_preset_revision ?? null;
+    this.activeLightingCustomized = scene?.lighting_customized ?? false;
+  },
+
+  /** Apply one complete backend event; stale/equal revisions are a no-op. */
+  applySceneState(this: GameState, payload: SceneStateProjectionPayload): boolean {
+    return projectSceneState(this, useUIStore(), payload);
   },
 
   /** 标记 LoadingTransition 启动动画已完成（§1.9 门控：动画期间不启动 ASR） */
   setLoadingComplete(this: GameState, v: boolean) {
     this.loadingComplete = v;
-  },
-
-  // 清除场景（更新 store，API 调用由组件负责）
-  clearCurrentScene(this: GameState) {
-    this.currentScene = null;
   },
 
   /** 截图主窗口（1 次 IPC，0 次窗口枚举）。若已有截图进行中则复用同一个 Promise。 */
@@ -134,6 +147,34 @@ export const actions = {
     return this.screenshotPending;
   },
 };
+
+function projectSceneState(
+  state: GameState,
+  uiStore: Pick<ReturnType<typeof useUIStore>, "currentBackground" | "setCurrentBackground">,
+  payload: SceneStateProjectionPayload
+): boolean {
+  const current: SceneStateMirror = {
+    currentScene: state.currentScene,
+    currentBackground: uiStore.currentBackground,
+    activeLighting: state.activeLighting,
+    activeLightingSource: state.activeLightingSource,
+    activeLightingPresetId: state.activeLightingPresetId,
+    activeLightingPresetRevision: state.activeLightingPresetRevision,
+    activeLightingCustomized: state.activeLightingCustomized,
+    lightingRevision: state.lightingRevision,
+  };
+  const next = applySceneStatePayload(current, payload);
+  if (next === current) return false;
+  state.currentScene = next.currentScene;
+  state.activeLighting = next.activeLighting;
+  state.activeLightingSource = next.activeLightingSource;
+  state.activeLightingPresetId = next.activeLightingPresetId;
+  state.activeLightingPresetRevision = next.activeLightingPresetRevision;
+  state.activeLightingCustomized = next.activeLightingCustomized;
+  state.lightingRevision = next.lightingRevision;
+  uiStore.setCurrentBackground(next.currentBackground);
+  return true;
+}
 
 /** 将 WebInitData 写入 GameState（init / 角色切换共用） */
 export function applyWebInitData(state: GameState, gameInfo: WebInitData): void {
@@ -208,7 +249,16 @@ export function applyWebInitData(state: GameState, gameInfo: WebInitData): void 
   uiStore.showCharacterTitle = characterInfo.ai_name;
   uiStore.showCharacterSubtitle = characterInfo.ai_subtitle;
 
-  if (gameInfo.background !== "") uiStore.setCurrentBackground(gameInfo.background);
+  projectSceneState(state, uiStore, {
+    scene: gameInfo.current_scene,
+    background: gameInfo.background,
+    active_lighting: gameInfo.active_lighting,
+    source: gameInfo.active_lighting_source,
+    preset_id: gameInfo.active_lighting_preset_id,
+    preset_revision: gameInfo.active_lighting_preset_revision,
+    customized: gameInfo.active_lighting_customized,
+    lighting_revision: gameInfo.lighting_revision,
+  });
   if (gameInfo.background_effect !== "") uiStore.setBackgroundEffect(gameInfo.background_effect);
 
   // 恢复背景音乐：用户上次手动选择优先于场景/剧本设定
@@ -238,11 +288,6 @@ export function applyWebInitData(state: GameState, gameInfo: WebInitData): void 
 
   // 同步场景感知开关
   settingsStore.setSceneAwarenessEnabled(gameInfo.scene_awareness_enabled);
-
-  // 恢复场景状态
-  if (gameInfo.current_scene) {
-    state.currentScene = gameInfo.current_scene;
-  }
 
   if (gameInfo.lines && gameInfo.lines.length > 0) {
     state.dialogHistory = convertInitLines(gameInfo.lines);

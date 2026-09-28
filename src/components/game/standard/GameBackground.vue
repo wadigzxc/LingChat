@@ -159,7 +159,8 @@
 
   // 背景光照叠加层（仅当 target 为 background 或 both 时启用）
   const bgOverlayStyle = computed(() => {
-    const l = gameStore.currentScene?.lighting;
+    // Legacy renderer remains until Task 11/13; runtime state already uses the V2 DTO.
+    const l = gameStore.currentScene?.lighting as Record<string, any> | undefined;
     if (!l?.overlay_enabled) return undefined;
     if (l.overlay_target !== "background" && l.overlay_target !== "both") return undefined;
     const blend = l.blend_mode !== "normal" ? l.blend_mode : "overlay";

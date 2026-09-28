@@ -3,7 +3,7 @@ import { WebSocketMessageTypes } from "../../../types";
 import { eventQueue } from "../../../core/events/event-queue";
 import { useUserStore } from "../../../stores/modules/user/user";
 import { useGameStore } from "../../../stores/modules/game";
-import { useUIStore } from "../../../stores/modules/ui/ui";
+
 import type * as ScriptTypes from "../../../types/script";
 
 export class ScriptHandler {
@@ -120,13 +120,7 @@ export class ScriptHandler {
       const gameStore = useGameStore();
 
       if (data.scene) {
-        gameStore.setCurrentScene(data.scene);
-
-        // 更新背景图片
-        if (data.scene.background) {
-          const uiStore = useUIStore();
-          uiStore.setCurrentBackground(data.scene.background);
-        }
+        gameStore.applyCurrentScene(data.scene);
       }
     });
   }

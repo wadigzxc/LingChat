@@ -33,6 +33,7 @@ import {
 import type { UndoFrame } from "./state";
 import { useEditorGetters } from "./getters";
 import { particleEffectOptions, canonicalEffectKey } from "@/components/game/standard/particles";
+import type { LightingParams, SceneLightingSource } from "@/types/scene-lighting";
 
 /** 编辑器消息文案走 i18n（对齐 stores/ui 的做法） */
 const t = i18n.global.t;
@@ -73,6 +74,38 @@ let validateSeq = 0;
 // （editor_start_preview 的 invoke 内部就 spawn 并 emit 事件，见 preparePreviewState），
 // 快照与还原整体迁入本模块，由 startPreview / PreviewStage 分别调用。
 
+interface PreviewRuntimeLightingState {
+  activeLighting: LightingParams;
+  activeLightingSource: SceneLightingSource;
+  activeLightingPresetId: string | null;
+  activeLightingPresetRevision: number | null;
+  activeLightingCustomized: boolean;
+  lightingRevision: number;
+}
+
+export function capturePreviewRuntimeLighting(state: PreviewRuntimeLightingState) {
+  return {
+    activeLighting: JSON.parse(JSON.stringify(state.activeLighting)) as LightingParams,
+    activeLightingSource: state.activeLightingSource,
+    activeLightingPresetId: state.activeLightingPresetId,
+    activeLightingPresetRevision: state.activeLightingPresetRevision,
+    activeLightingCustomized: state.activeLightingCustomized,
+    lightingRevision: state.lightingRevision,
+  };
+}
+
+export function restorePreviewRuntimeLighting(
+  state: PreviewRuntimeLightingState,
+  snapshot: ReturnType<typeof capturePreviewRuntimeLighting>
+) {
+  state.activeLighting = JSON.parse(JSON.stringify(snapshot.activeLighting)) as LightingParams;
+  state.activeLightingSource = snapshot.activeLightingSource;
+  state.activeLightingPresetId = snapshot.activeLightingPresetId;
+  state.activeLightingPresetRevision = snapshot.activeLightingPresetRevision;
+  state.activeLightingCustomized = snapshot.activeLightingCustomized;
+  state.lightingRevision = snapshot.lightingRevision;
+}
+
 /** 试玩进出场会被引擎改写的 gameStore 字段（非响应式快照，还原原始引用）。 */
 function capturePreviewGameState() {
   const gameStore = useGameStore();
@@ -84,6 +117,7 @@ function capturePreviewGameState() {
     userName: gameStore.userName,
     userSubtitle: gameStore.userSubtitle,
     currentScene: gameStore.currentScene,
+    runtimeLighting: capturePreviewRuntimeLighting(gameStore),
     currentLine: gameStore.currentLine,
     currentStatus: gameStore.currentStatus,
     dialogHistory: [...gameStore.dialogHistory],
@@ -149,6 +183,7 @@ function restorePreviewGameState(s: PreviewGameSnapshot) {
   gameStore.userName = s.userName;
   gameStore.userSubtitle = s.userSubtitle;
   gameStore.currentScene = s.currentScene;
+  restorePreviewRuntimeLighting(gameStore, s.runtimeLighting);
   gameStore.currentLine = s.currentLine;
   gameStore.currentStatus = s.currentStatus;
   gameStore.dialogHistory = s.dialogHistory;

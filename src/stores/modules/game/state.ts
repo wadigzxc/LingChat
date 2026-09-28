@@ -1,6 +1,8 @@
 import type { Live2dSettings } from "@/types/live2d";
 import type { SceneInfo } from "@/api/services/scene"; // 导入场景类型
 import type { ScriptChoiceItem } from "@/types/script";
+import type { LightingParams, SceneLightingSource } from "@/types/scene-lighting";
+import { createNeutralLighting } from "@/utils/scene-lighting/scene-state";
 
 export interface GameMessage {
   type: "message" | "reply";
@@ -77,6 +79,12 @@ export interface GameState {
   thinkingLength: number;
   dialogHistory: GameMessage[];
   currentScene: SceneInfo | null; // 当前加载的场景
+  activeLighting: LightingParams;
+  activeLightingSource: SceneLightingSource;
+  activeLightingPresetId: string | null;
+  activeLightingPresetRevision: number | null;
+  activeLightingCustomized: boolean;
+  lightingRevision: number;
   command: string | null;
 
   initialized: boolean;
@@ -103,6 +111,13 @@ export const state: GameState = {
   thinkingLength: 0,
   dialogHistory: [],
   currentScene: null,
+  activeLighting: createNeutralLighting(),
+  activeLightingSource: "neutral",
+  activeLightingPresetId: null,
+  activeLightingPresetRevision: null,
+  activeLightingCustomized: false,
+  // -1 lets the backend's initial revision 0 seed a fresh webview.
+  lightingRevision: -1,
   command: null,
 
   initialized: false,

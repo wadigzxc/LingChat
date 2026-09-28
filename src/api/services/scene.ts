@@ -1,63 +1,72 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export interface FilterParams {
-  brightness: number;
-  contrast: number;
-  saturation: number;
-  sepia: number;
-  glow_radius: number;
-  glow_color: string;
+import type { LightingParams } from "@/types/scene-lighting";
+
+export type { LightingParams } from "@/types/scene-lighting";
+
+export interface SceneLightingMetadata {
+  lighting_preset_id: string | null;
+  lighting_preset_revision: number | null;
+  lighting_customized: boolean;
 }
 
-export interface LightingParams {
-  character: FilterParams;
-  background: FilterParams;
-  overlay_enabled: boolean;
-  blend_mode: string;
-  light_x: number;
-  light_y: number;
-  overlay_color1: string;
-  overlay_color2: string;
-  overlay_radius: number;
-  overlay_opacity: number;
-  overlay_target: string;
+export function getSceneLightingMetadata(
+  scene: Pick<SceneInfo, keyof SceneLightingMetadata>
+): SceneLightingMetadata {
+  return {
+    lighting_preset_id: scene.lighting_preset_id,
+    lighting_preset_revision: scene.lighting_preset_revision,
+    lighting_customized: scene.lighting_customized,
+  };
 }
 
-export interface SceneInfo {
+export function getSceneLightingMetadataForSave(
+  initial: SceneLightingMetadata & { lighting?: LightingParams | null },
+  lighting: LightingParams | null
+): SceneLightingMetadata {
+  if (lighting === null) {
+    return {
+      lighting_preset_id: null,
+      lighting_preset_revision: null,
+      lighting_customized: false,
+    };
+  }
+
+  return {
+    lighting_preset_id: initial.lighting_preset_id,
+    lighting_preset_revision: initial.lighting_preset_revision,
+    lighting_customized:
+      initial.lighting_customized ||
+      JSON.stringify(initial.lighting ?? null) !== JSON.stringify(lighting),
+  };
+}
+
+export interface SceneInfo extends SceneLightingMetadata {
   id: string;
   scene_name: string;
   scene_description: string;
   background: string | null;
   lighting: LightingParams | null;
-  lighting_preset_id: string | null;
-  lighting_preset_revision: number | null;
-  lighting_customized: boolean;
   created_at: string;
   updated_at: string;
   /** 来源："game" 或提供该场景背景图的插件 id。 */
-  source?: string;
+  source: string;
   plugin_id?: string | null;
 }
 
-export interface CreateSceneRequest {
+export interface CreateSceneRequest extends SceneLightingMetadata {
   scene_name: string;
   scene_description: string;
   background: string;
   lighting?: LightingParams | null;
-  lighting_preset_id?: string | null;
-  lighting_preset_revision?: number | null;
-  lighting_customized?: boolean;
 }
 
-export interface UpdateSceneRequest {
+export interface UpdateSceneRequest extends SceneLightingMetadata {
   id: string;
   scene_name: string;
   scene_description: string;
   background: string;
   lighting?: LightingParams | null;
-  lighting_preset_id?: string | null;
-  lighting_preset_revision?: number | null;
-  lighting_customized?: boolean;
 }
 
 export async function listScenes(): Promise<SceneInfo[]> {

@@ -510,7 +510,9 @@
     updateScene,
     deleteScene,
     selectScene,
+    getSceneLightingMetadata,
     type SceneInfo,
+    type SceneLightingMetadata,
     type LightingParams,
   } from "../../../api/services/scene";
   import type { BackgroundImageInfo } from "../../../types";
@@ -663,12 +665,12 @@
   const editMode = ref<"create" | "update">("create");
   const editingSceneId = ref<string | null>(null);
   const editInitialData = ref<
-    | {
+    | (SceneLightingMetadata & {
         sceneName: string;
         sceneImage: string | null;
         sceneDescription: string;
         lighting?: LightingParams | null;
-      }
+      })
     | undefined
   >();
 
@@ -706,10 +708,13 @@
   const handleSceneClick = async (scene: SceneInfo) => {
     // 点击当前已激活的场景则取消选中，背景默认为透明
     if (gameStore.currentScene?.id === scene.id) {
-      gameStore.clearCurrentScene();
-      uiStore.setCurrentBackground("");
-      unlockAchievement("see_through").catch(console.error);
-      await fetchScenes();
+      try {
+        await selectScene(null);
+        unlockAchievement("see_through").catch(console.error);
+        await fetchScenes();
+      } catch (error) {
+        console.error("取消场景失败", error);
+      }
       return;
     }
 
@@ -724,10 +729,6 @@
 
     try {
       await selectScene(scene.id);
-      gameStore.setCurrentScene(scene);
-      if (scene.background) {
-        uiStore.setCurrentBackground(scene.background);
-      }
       await fetchScenes();
     } catch (error) {
       console.error("选择场景失败", error);
@@ -742,6 +743,7 @@
       sceneImage: scene.background || null,
       sceneDescription: scene.scene_description,
       lighting: scene.lighting,
+      ...getSceneLightingMetadata(scene),
     };
     showSceneEdit.value = true;
   };
@@ -768,19 +770,20 @@
 
     try {
       await deleteScene(currentScene.value.id);
-      gameStore.clearCurrentScene();
       await fetchScenes();
     } catch (error) {
       console.error("删除场景失败", error);
     }
   };
 
-  const handleSceneSubmit = async (data: {
-    sceneName: string;
-    sceneImage: string | null;
-    sceneDescription: string;
-    lighting?: LightingParams | null;
-  }) => {
+  const handleSceneSubmit = async (
+    data: SceneLightingMetadata & {
+      sceneName: string;
+      sceneImage: string | null;
+      sceneDescription: string;
+      lighting?: LightingParams | null;
+    }
+  ) => {
     try {
       if (editMode.value === "create") {
         await createScene({
@@ -788,6 +791,9 @@
           scene_description: data.sceneDescription,
           background: data.sceneImage || "",
           lighting: data.lighting ?? null,
+          lighting_preset_id: data.lighting_preset_id,
+          lighting_preset_revision: data.lighting_preset_revision,
+          lighting_customized: data.lighting_customized,
         });
       } else {
         if (!editingSceneId.value) return;
@@ -797,21 +803,13 @@
           scene_description: data.sceneDescription,
           background: data.sceneImage || "",
           lighting: data.lighting ?? null,
+          lighting_preset_id: data.lighting_preset_id,
+          lighting_preset_revision: data.lighting_preset_revision,
+          lighting_customized: data.lighting_customized,
         });
       }
       showSceneEdit.value = false;
       await fetchScenes();
-
-      // 如果更新的是当前选中的场景，立即同步到 gameStore 使光影等参数即时生效
-      if (editMode.value === "update" && editingSceneId.value === gameStore.currentScene?.id) {
-        const updatedScene = scenes.value.find((s) => s.id === editingSceneId.value);
-        if (updatedScene) {
-          gameStore.setCurrentScene(updatedScene);
-          if (updatedScene.background) {
-            uiStore.setCurrentBackground(updatedScene.background);
-          }
-        }
-      }
     } catch (error) {
       console.error("操作失败", error);
     }
@@ -825,11 +823,6 @@
     }
 
     await fetchScenes();
-
-    // 恢复上次选中的场景
-    if (gameStore.currentScene?.background) {
-      uiStore.setCurrentBackground(gameStore.currentScene.background);
-    }
 
     // 加载 CPU + GPU 性能信息
     await fetchPerfInfo();

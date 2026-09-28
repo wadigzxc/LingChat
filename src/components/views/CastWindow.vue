@@ -52,6 +52,7 @@
   import { useGameStore } from "@/stores/modules/game";
   import { useUIStore } from "@/stores/modules/ui/ui";
   import { listScenes, type SceneInfo } from "@/api/services/scene";
+  import type { CastMirror, CastRuntimeLighting, CastSnapshot } from "@/types/scene-lighting";
 
   /**
    * 主窗口镜像（App.vue 在台词变化时经 cast_emit_mirror 存储 + 广播 cast:mirror）。
@@ -60,23 +61,6 @@
    * 就会「按消息到达时间显示」，而主界面是等玩家逐句点击推进的——两条线脱节。
    * 镜像把主窗口「正在显示的完整状态」整包同步过来，投屏完全跟随主窗口。
    */
-  interface CastMirror {
-    line: string;
-    title: string;
-    subtitle: string;
-    emotion: string;
-    motionText: string;
-    status: string;
-    background: string | null;
-    backgroundEffect: string | null;
-    currentSceneId: string | null;
-    presentRoleIds: number[];
-    currentRoleId: number | null;
-    /** 当前交互角色的 Live2D / 立绘表情（镜像携带，驱动表情切换） */
-    roleEmotion: string;
-    /** 当前交互角色的原始情绪标签（立绘目录映射用） */
-    roleOriginalEmotion: string;
-  }
 
   /** 设置页「角色调整 / 对话框调整」的投屏渲染参数（默认与主界面一致） */
   interface CastTune {
@@ -186,23 +170,36 @@
 
   // ── 场景 / 角色应用（镜像与快照对账共用） ──────────────────
 
-  // 背景图 / 背景效果
-  function applyBackground(bg: string, effect: string) {
-    if (bg && bg !== uiStore.currentBackground) uiStore.setCurrentBackground(bg);
+  function applyBackgroundEffect(effect: string) {
     if (effect !== uiStore.currentBackgroundEffect) uiStore.setBackgroundEffect(effect);
   }
 
-  // 场景光照（GameRolesStage 的 lightOverlayStyle 依赖 currentScene）
-  async function applyScene(sceneId: string) {
+  // 场景、背景和运行时光影必须以 lightingRevision 为单一去重键。
+  async function applyRuntimeScene(runtime: CastRuntimeLighting) {
     try {
-      let scene = scenesCache.find((s) => s.id === String(sceneId));
-      if (!scene) {
+      let scene: SceneInfo | null = null;
+      if (runtime.currentSceneId) {
+        scene =
+          gameStore.currentScene?.id === runtime.currentSceneId ? gameStore.currentScene : null;
+      }
+      if (runtime.currentSceneId && !scene) {
+        scene = scenesCache.find((s) => s.id === runtime.currentSceneId) ?? null;
+      }
+      if (runtime.currentSceneId && !scene) {
         scenesCache = await listScenes();
-        scene = scenesCache.find((s) => s.id === String(sceneId));
+        scene = scenesCache.find((s) => s.id === runtime.currentSceneId) ?? null;
       }
-      if (scene && gameStore.currentScene?.id !== String(sceneId)) {
-        gameStore.setCurrentScene(scene);
-      }
+      if (runtime.currentSceneId && !scene) return;
+      gameStore.applySceneState({
+        scene,
+        background: runtime.background ?? "",
+        active_lighting: runtime.activeLighting,
+        source: runtime.activeLightingSource,
+        preset_id: runtime.activeLightingPresetId,
+        preset_revision: runtime.activeLightingPresetRevision,
+        customized: runtime.activeLightingCustomized,
+        lighting_revision: runtime.lightingRevision,
+      });
     } catch {
       /* 场景光照缺失不阻塞渲染 */
     }
@@ -250,8 +247,8 @@
   // ── 镜像应用：主窗口当前显示什么，投屏就显示什么 ────────────
   async function applyMirror(m: CastMirror) {
     // 场景部分（仅变化时应用，避免打断 Live2D 舞台）
-    applyBackground(m.background ?? "", m.backgroundEffect ?? "");
-    if (m.currentSceneId) void applyScene(m.currentSceneId);
+    applyBackgroundEffect(m.backgroundEffect ?? "");
+    await applyRuntimeScene(m);
     await applyRoles(m.presentRoleIds ?? [], m.currentRoleId ?? null);
 
     // 情绪状态：在角色就位后应用到当前交互角色（Live2D 表情 / 立绘切换）
@@ -295,20 +292,12 @@
         return;
       }
 
-      applyBackground(snap.background ?? "", snap.backgroundEffect ?? "");
-      if (snap.currentSceneId) await applyScene(String(snap.currentSceneId));
+      applyBackgroundEffect(snap.backgroundEffect ?? "");
+      await applyRuntimeScene(snap);
       await applyRoles(snap.presentRoleIds ?? [], snap.currentRoleId ?? null);
     } finally {
       reconciling = false;
     }
-  }
-
-  interface CastSnapshot {
-    background: string | null;
-    backgroundEffect: string | null;
-    currentSceneId: string | null;
-    presentRoleIds: number[];
-    currentRoleId: number | null;
   }
 
   let reconcileTimer: ReturnType<typeof setInterval> | null = null;

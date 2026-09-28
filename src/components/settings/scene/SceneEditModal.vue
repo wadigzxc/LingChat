@@ -473,30 +473,35 @@
   import { useGameStore } from "../../../stores/modules/game";
   import { EMOTION_CONFIG_EMO } from "../../../controllers/emotion/config";
   import type { BackgroundImageInfo } from "../../../types";
-  import type { LightingParams, FilterParams } from "../../../api/services/scene";
+  import type {
+    BlendMode,
+    FilterParams,
+    LightingParams,
+    LightingTarget,
+  } from "@/types/scene-lighting";
+  import { cloneLightingOrNeutral } from "@/utils/scene-lighting/scene-state";
+  import {
+    getSceneLightingMetadataForSave,
+    type SceneLightingMetadata,
+  } from "@/api/services/scene";
+
+  interface SceneEditorData extends SceneLightingMetadata {
+    sceneName: string;
+    sceneImage: string | null;
+    sceneDescription: string;
+    lighting?: LightingParams | null;
+  }
 
   const props = defineProps<{
     show: boolean;
     mode: "create" | "update";
     backgrounds: BackgroundImageInfo[];
-    initialData?: {
-      sceneName: string;
-      sceneImage: string | null;
-      sceneDescription: string;
-      lighting?: LightingParams | null;
-    };
+    initialData?: SceneEditorData;
   }>();
 
   const emit = defineEmits<{
     close: [];
-    submit: [
-      data: {
-        sceneName: string;
-        sceneImage: string | null;
-        sceneDescription: string;
-        lighting?: LightingParams | null;
-      },
-    ];
+    submit: [data: SceneEditorData];
     upload: [];
   }>();
 
@@ -802,7 +807,7 @@
         const l = props.initialData.lighting;
         if (l) {
           formData.lightingEnabled = true;
-          formData.overlayEnabled = l.overlay_enabled;
+          formData.overlayEnabled = l.main_light.enabled;
           formData.charBrightness = l.character.brightness;
           formData.charContrast = l.character.contrast;
           formData.charSaturation = l.character.saturation;
@@ -815,14 +820,14 @@
           formData.bgSepia = l.background.sepia;
           formData.bgGlowRadius = l.background.glow_radius;
           formData.bgGlowColor = l.background.glow_color;
-          formData.blendMode = l.blend_mode;
-          formData.lightX = l.light_x;
-          formData.lightY = l.light_y;
-          formData.overlayColor1 = l.overlay_color1;
-          formData.overlayColor2 = l.overlay_color2;
-          formData.overlayRadius = l.overlay_radius ?? 80;
-          formData.overlayOpacity = (l.overlay_opacity ?? 0.5) * 100;
-          formData.overlayTarget = l.overlay_target || "both";
+          formData.blendMode = l.main_light.blend_mode;
+          formData.lightX = l.main_light.x * 100;
+          formData.lightY = l.main_light.y * 100;
+          formData.overlayColor1 = l.main_light.color_start;
+          formData.overlayColor2 = l.main_light.color_end;
+          formData.overlayRadius = l.main_light.radius * 100;
+          formData.overlayOpacity = l.main_light.opacity * 100;
+          formData.overlayTarget = l.main_light.target;
           showLighting.value = true;
         } else {
           formData.lightingEnabled = false;
@@ -948,25 +953,37 @@
         glow_radius: formData.bgGlowRadius,
         glow_color: formData.bgGlowColor,
       };
-      lighting = {
-        character: charFilter,
-        background: bgFilter,
-        overlay_enabled: formData.overlayEnabled,
-        blend_mode: formData.blendMode,
-        light_x: formData.lightX,
-        light_y: formData.lightY,
-        overlay_color1: formData.overlayColor1,
-        overlay_color2: formData.overlayColor2,
-        overlay_radius: formData.overlayRadius,
-        overlay_opacity: formData.overlayOpacity / 100,
-        overlay_target: formData.overlayTarget,
+      // Preserve V2 effects this legacy editor does not expose yet (rim/bloom/vignette/assets).
+      lighting = cloneLightingOrNeutral(props.initialData?.lighting);
+      lighting.enabled = true;
+      lighting.character = charFilter;
+      lighting.background = bgFilter;
+      lighting.main_light = {
+        ...lighting.main_light,
+        enabled: formData.overlayEnabled,
+        blend_mode: formData.blendMode as BlendMode,
+        x: formData.lightX / 100,
+        y: formData.lightY / 100,
+        color_start: formData.overlayColor1,
+        color_end: formData.overlayColor2,
+        radius: formData.overlayRadius / 100,
+        opacity: formData.overlayOpacity / 100,
+        target: formData.overlayTarget as LightingTarget,
       };
     }
+    const lightingMetadata = props.initialData
+      ? getSceneLightingMetadataForSave(props.initialData, lighting)
+      : {
+          lighting_preset_id: null,
+          lighting_preset_revision: null,
+          lighting_customized: lighting !== null,
+        };
     emit("submit", {
       sceneName: formData.sceneName.trim(),
       sceneImage: formData.sceneImage || null,
       sceneDescription: formData.sceneDescription.trim(),
       lighting,
+      ...lightingMetadata,
     });
   };
 </script>

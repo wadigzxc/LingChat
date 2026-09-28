@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Live2dSettings } from "@/types/live2d";
 import type { SceneInfo } from "./scene";
+import type { LightingParams, SceneLightingSource } from "@/types/scene-lighting";
 
 // 1. 定义角色配置接口 (原先摊平的字段现在归属到这里)
 export interface CharacterSettings {
@@ -56,6 +57,12 @@ export interface WebInitData {
   background_music: string;
   current_scene_id: string | null;
   current_scene: SceneInfo | null;
+  active_lighting: LightingParams;
+  active_lighting_source: SceneLightingSource;
+  active_lighting_preset_id: string | null;
+  active_lighting_preset_revision: number | null;
+  active_lighting_customized: boolean;
+  lighting_revision: number;
   lines: GameLineInit[];
   scene_awareness_enabled: boolean;
   /** 上次会话的背景音乐曲目（session store 恢复） */

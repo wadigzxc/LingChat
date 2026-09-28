@@ -62,7 +62,8 @@
   const voiceDataUrl = ref("");
 
   const lightOverlayStyle = computed(() => {
-    const l = gameStore.currentScene?.lighting;
+    // Legacy renderer remains until Task 11/13; runtime state already uses the V2 DTO.
+    const l = gameStore.currentScene?.lighting as Record<string, any> | undefined;
     if (!l?.overlay_enabled) return undefined;
     if (l.overlay_target !== "character" && l.overlay_target !== "both") return undefined;
     const blend = l.blend_mode !== "normal" ? l.blend_mode : "overlay";
