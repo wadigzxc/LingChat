@@ -19,14 +19,41 @@
           GameDialog 作为普通块元素落在最上面，于是试玩时对话框跑到了屏幕顶部。
           复用同一个类还顺带保证：以后正式游玩的布局改了，试玩跟着一起变。
         -->
-        <div class="main-box">
+        <div class="main-box" :style="{ isolation: 'isolate' }">
           <!-- 复用真实的游戏渲染层。这是当初选「复用真引擎 + 真渲染层」而不是
                另写一套预览解释器的兑现点：这四个组件读的是同一份 store，
                引擎 emit 的事件经 eventQueue 进来后，表现与正式游玩逐帧一致。 -->
           <GameBackground />
+          <FinalLightingOverlay
+            data-lighting-overall="behind"
+            placement="behind"
+            :lighting="lighting"
+            :options="options"
+            :simplified="simplified"
+            :resolve-asset="resolveAsset"
+            :style="{ zIndex: 1 }"
+          />
           <GameRolesStage />
+          <div
+            data-lighting-overall="front"
+            class="pointer-events-none absolute inset-0"
+            :style="{ zIndex: 3 }"
+          >
+            <LightingOverlay
+              :lighting="lighting"
+              surface="both"
+              :options="options"
+              :simplified="simplified"
+            />
+            <FinalLightingOverlay
+              :lighting="lighting"
+              :options="options"
+              :simplified="simplified"
+              :resolve-asset="resolveAsset"
+            />
+          </div>
           <GameExtraUI />
-          <GameDialog />
+          <GameDialog data-lighting-dialog :style="{ zIndex: 4 }" />
         </div>
 
         <!-- 预览专属的顶栏，明确「这是试玩」而不是真在玩 -->
@@ -61,14 +88,22 @@
 </template>
 
 <script setup lang="ts">
+  import { provideSceneLighting } from "@/composables/useSceneLighting";
   import { computed, watch } from "vue";
   import { useI18n } from "vue-i18n";
-  import { GameBackground, GameDialog, GameRolesStage } from "@/components/game/standard";
+  import {
+    GameBackground,
+    GameDialog,
+    GameRolesStage,
+    FinalLightingOverlay,
+    LightingOverlay,
+  } from "@/components/game/standard";
   import GameExtraUI from "@/components/game/standard/GameExtraUI.vue";
   import { eventQueue } from "@/core/events/event-queue";
   import { useScriptEditorStore } from "@/stores/modules/script-editor";
   import { useGameStore } from "@/stores/modules/game";
 
+  const { lighting, simplified, options, resolveAsset } = provideSceneLighting();
   const { t } = useI18n();
   const store = useScriptEditorStore();
   const gameStore = useGameStore();

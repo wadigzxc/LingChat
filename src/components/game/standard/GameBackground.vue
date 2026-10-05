@@ -1,90 +1,123 @@
 <template>
-  <!-- 背景图 + 背景光照滤镜 -->
-  <div v-if="backgroundSrc" class="absolute inset-0" :style="bgLightingFilter">
-    <ImageAcrossFade
-      ref="imageFadeRef"
-      class="game-background"
-      :src="backgroundSrc"
-      position="center center"
-      object-fit="cover"
-      :duration="uiStore.currentBackgroundTransition"
-    />
-  </div>
-
-  <!-- 粒子特效层：独立于背景图，透明背景时依然显示 -->
-  <!-- isolation: isolate 建立独立层叠上下文，把粒子组件内部的 z-index 限制在本层内，
-       防止其逃逸到根层叠上下文盖过 UI 面板 -->
-  <div class="pointer-events-none absolute inset-0" style="isolation: isolate">
-    <StarField
-      ref="starfieldRef"
-      v-if="uiStore.currentBackgroundEffect === 'StarField'"
-      :enabled="starfieldEnabled"
-      :star-count="starCount"
-      :scroll-speed="scrollSpeed"
-      :colors="starColors"
-      :style="`z-index:${BACKGROUND_ZINDEX}`"
-      @ready="onStarfieldReady"
-    />
-    <Rain
-      v-if="uiStore.currentBackgroundEffect === 'Rain'"
-      :enabled="rainEnabled"
-      :intensity="rainIntensity"
-      :style="`z-index:${BACKGROUND_ZINDEX}`"
-    />
-    <Sakura
-      v-if="uiStore.currentBackgroundEffect === 'Sakura'"
-      :enabled="true"
-      :intensity="1.5"
-      :style="`z-index:${BACKGROUND_ZINDEX}`"
-    />
-    <Snow
-      v-if="uiStore.currentBackgroundEffect === 'Snow'"
-      :intensity="snowIntensity"
-      :enabled="true"
-      :style="`z-index:${BACKGROUND_ZINDEX}`"
-    />
-    <Fireworks
-      v-if="uiStore.currentBackgroundEffect === 'Fireworks'"
-      :enabled="true"
-      :intensity="1.5"
-      :style="`z-index:${BACKGROUND_ZINDEX}`"
-    />
-  </div>
-
-  <!-- 背景光照叠加层（在背景上方、角色下方） -->
   <div
-    v-if="bgOverlayStyle"
-    class="pointer-events-none absolute inset-0"
-    :style="bgOverlayStyle as any"
-  ></div>
+    data-lighting-background
+    class="absolute inset-0"
+    :style="{ isolation: 'isolate', zIndex: 0 }"
+  >
+    <!-- 背景图 + 背景光照滤镜 -->
+    <div
+      v-if="backgroundSrc"
+      data-lighting-background-visual
+      class="absolute inset-0"
+      :style="{ filter: compiledBackground.filter, zIndex: 0 }"
+    >
+      <ImageAcrossFade
+        ref="imageFadeRef"
+        class="game-background"
+        :src="backgroundSrc"
+        position="center center"
+        object-fit="cover"
+        :duration="uiStore.currentBackgroundTransition"
+      />
+    </div>
 
-  <!-- 短效音效保留默认实现即可，不需要淡入淡出 -->
-  <audio ref="soundEffectPlayer"></audio>
+    <!-- 粒子特效层：独立于背景图，透明背景时依然显示 -->
+    <!-- isolation: isolate 建立独立层叠上下文，把粒子组件内部的 z-index 限制在本层内，
+       防止其逃逸到根层叠上下文盖过 UI 面板 -->
+    <div class="pointer-events-none absolute inset-0" style="isolation: isolate">
+      <StarField
+        ref="starfieldRef"
+        v-if="uiStore.currentBackgroundEffect === 'StarField'"
+        :enabled="starfieldEnabled"
+        :star-count="starCount"
+        :scroll-speed="scrollSpeed"
+        :colors="starColors"
+        :style="`z-index:${BACKGROUND_ZINDEX}`"
+        @ready="onStarfieldReady"
+      />
+      <Rain
+        v-if="uiStore.currentBackgroundEffect === 'Rain'"
+        :enabled="rainEnabled"
+        :intensity="rainIntensity"
+        :style="`z-index:${BACKGROUND_ZINDEX}`"
+      />
+      <Sakura
+        v-if="uiStore.currentBackgroundEffect === 'Sakura'"
+        :enabled="true"
+        :intensity="1.5"
+        :style="`z-index:${BACKGROUND_ZINDEX}`"
+      />
+      <Snow
+        v-if="uiStore.currentBackgroundEffect === 'Snow'"
+        :intensity="snowIntensity"
+        :enabled="true"
+        :style="`z-index:${BACKGROUND_ZINDEX}`"
+      />
+      <Fireworks
+        v-if="uiStore.currentBackgroundEffect === 'Fireworks'"
+        :enabled="true"
+        :intensity="1.5"
+        :style="`z-index:${BACKGROUND_ZINDEX}`"
+      />
+    </div>
 
-  <!-- 全新解耦出来的双轨交叉音乐淡入淡出组件 -->
-  <AudioAcrossFade
-    :src="backgroundMusicSrc"
-    :volume="uiStore.backgroundVolume"
-    :paused="uiStore.bgMusicPaused"
-    :stopped="uiStore.bgMusicStoped"
-    :rate="uiStore.bgMusicPlaybackRate"
-    :duration="800"
-    :loop="uiStore.bgMusicMode === 'loop-single'"
-    @ended="handleTrackEnd"
-  />
+    <div class="pointer-events-none absolute inset-0" :style="{ zIndex: 1, isolation: 'isolate' }">
+      <LightingAssetStack
+        :lighting="lighting"
+        surface="background"
+        placement="behind"
+        :resolve-asset="resolveAsset"
+        :options="options"
+        :simplified="simplified"
+      />
+    </div>
+    <div class="pointer-events-none absolute inset-0" :style="{ zIndex: 2 }">
+      <LightingOverlay
+        :lighting="lighting"
+        surface="background"
+        :options="options"
+        :simplified="simplified"
+      />
+    </div>
 
-  <!-- 环境音多轨渲染（每轨独立交叉淡入淡出循环组件，最多8轨并行） -->
-  <AmbientLoopPlayer
-    v-for="d in displayTracks"
-    :key="d.id"
-    :src="srcOf(d)"
-    :volume="d.volume"
-    :loop="d.loop"
-    :fade="d.fade"
-    :paused="d.paused"
-    :stopped="d.stopped"
-    @stopped-done="onStoppedDone(d.id)"
-  />
+    <div class="pointer-events-none absolute inset-0" :style="{ zIndex: 3, isolation: 'isolate' }">
+      <LightingAssetStack
+        :lighting="lighting"
+        surface="background"
+        placement="front"
+        :resolve-asset="resolveAsset"
+        :options="options"
+        :simplified="simplified"
+      />
+    </div>
+    <!-- 短效音效保留默认实现即可，不需要淡入淡出 -->
+    <audio ref="soundEffectPlayer"></audio>
+
+    <!-- 全新解耦出来的双轨交叉音乐淡入淡出组件 -->
+    <AudioAcrossFade
+      :src="backgroundMusicSrc"
+      :volume="uiStore.backgroundVolume"
+      :paused="uiStore.bgMusicPaused"
+      :stopped="uiStore.bgMusicStoped"
+      :rate="uiStore.bgMusicPlaybackRate"
+      :duration="800"
+      :loop="uiStore.bgMusicMode === 'loop-single'"
+      @ended="handleTrackEnd"
+    />
+
+    <!-- 环境音多轨渲染（每轨独立交叉淡入淡出循环组件，最多8轨并行） -->
+    <AmbientLoopPlayer
+      v-for="d in displayTracks"
+      :key="d.id"
+      :src="srcOf(d)"
+      :volume="d.volume"
+      :loop="d.loop"
+      :fade="d.fade"
+      :paused="d.paused"
+      :stopped="d.stopped"
+      @stopped-done="onStoppedDone(d.id)"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -92,7 +125,9 @@
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { toPlayableMediaUrl } from "@/utils/mediaUrl";
   import { useUIStore } from "../../../stores/modules/ui/ui";
-  import { useGameStore } from "../../../stores/modules/game";
+  import { compileLighting } from "@/utils/scene-lighting/style";
+  import { LightingOverlay, LightingAssetStack } from "@/components/game/lighting";
+  import { useSceneLighting } from "@/composables/useSceneLighting";
   import ImageAcrossFade from "@/components/ui/ImageAcrossFade.vue";
   import AudioAcrossFade from "@/components/ui/AudioAcrossFade.vue";
   import AmbientLoopPlayer from "@/components/ui/AmbientLoopPlayer.vue";
@@ -103,7 +138,8 @@
   import Fireworks from "./particles/Fireworks.vue";
 
   const uiStore = useUIStore();
-  const gameStore = useGameStore();
+  const { lighting, simplified, options, resolveAsset } = useSceneLighting();
+  const compiledBackground = computed(() => compileLighting(lighting.value, "background", options));
 
   const backgroundSrc = computed(() => {
     const bg = uiStore.currentBackground;
@@ -143,33 +179,6 @@
     },
     { immediate: true }
   );
-
-  // 背景光照滤镜
-  const bgLightingFilter = computed(() => {
-    const c = gameStore.currentScene?.lighting?.background;
-    if (!c) return undefined;
-    const parts: string[] = [];
-    if (c.brightness !== 1.0) parts.push(`brightness(${c.brightness})`);
-    if (c.contrast !== 1.0) parts.push(`contrast(${c.contrast})`);
-    if (c.saturation !== 1.0) parts.push(`saturate(${c.saturation})`);
-    if (c.glow_radius > 0) parts.push(`drop-shadow(0 0 ${c.glow_radius}px ${c.glow_color})`);
-    if (c.sepia > 0) parts.push(`sepia(${c.sepia})`);
-    return parts.length > 0 ? { filter: parts.join(" ") } : undefined;
-  });
-
-  // 背景光照叠加层（仅当 target 为 background 或 both 时启用）
-  const bgOverlayStyle = computed(() => {
-    // Legacy renderer remains until Task 11/13; runtime state already uses the V2 DTO.
-    const l = gameStore.currentScene?.lighting as Record<string, any> | undefined;
-    if (!l?.overlay_enabled) return undefined;
-    if (l.overlay_target !== "background" && l.overlay_target !== "both") return undefined;
-    const blend = l.blend_mode !== "normal" ? l.blend_mode : "overlay";
-    return {
-      background: `radial-gradient(circle at ${l.light_x}% ${l.light_y}%, ${l.overlay_color1} 0%, ${l.overlay_color2} ${l.overlay_radius}%)`,
-      mixBlendMode: blend,
-      opacity: l.overlay_opacity,
-    };
-  });
 
   // 背景效果 z-index 应该比其他组件高，否则会被覆盖
   const BACKGROUND_ZINDEX = 114514;
@@ -326,6 +335,6 @@
     background-position: center center;
     background-attachment: fixed;
     background-repeat: no-repeat;
-    z-index: -2;
+    z-index: 0;
   }
 </style>

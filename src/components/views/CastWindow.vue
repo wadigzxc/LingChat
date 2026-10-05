@@ -2,7 +2,7 @@
   <div
     class="cast-shell fixed inset-0 z-0 overflow-hidden bg-black"
     :class="{ 'cast-hide-dialog': tune.dialogHidden }"
-    :style="castShellStyle"
+    :style="{ ...castShellStyle, isolation: 'isolate' }"
   >
     <!-- 无边框窗口的拖拽条：去掉原生标题栏后靠它移动窗口（透明，不干扰画面） -->
     <div class="cast-drag-region" data-tauri-drag-region></div>
@@ -10,18 +10,45 @@
     <div class="cast-layer z-0">
       <GameBackground />
     </div>
+    <FinalLightingOverlay
+      data-lighting-overall="behind"
+      placement="behind"
+      :lighting="lighting"
+      :options="options"
+      :simplified="simplified"
+      :resolve-asset="resolveAsset"
+      :style="{ zIndex: 1 }"
+    />
     <!-- 角色舞台层（Live2D 直接复用现有组件，天然支持）：
          缩放作为 cast-scale prop 注入 Live2D / 立绘布局（作用于模型本体，保持贴底定位）；
          垂直偏移作为 cast-offset-y prop 注入布局并在布局内夹紧（下移触底即止，
          人物下方不会被窗口 overflow:hidden 截断，且角色自身 offset 不被夹紧）；
          水平偏移经本层 .cast-role-layer 的 CSS translateX 整层平移（与最初版本一致的
          已验证方案，不依赖布局链重跑）。 -->
-    <div class="cast-layer cast-role-layer z-1">
+    <div class="cast-layer cast-role-layer" :style="{ zIndex: 2 }">
       <GameRolesStage :cast-scale="tune.charScale" :cast-offset-y="tune.charOffsetY" />
     </div>
     <!-- 对话层（打字机 / 情绪 / 动作文本）：
          复刻主界面 .main-box 的 flex column + justify-end，让对话框贴底居中显示 -->
-    <div class="cast-layer cast-dialog-layer z-2">
+    <div
+      data-lighting-overall="front"
+      class="cast-layer pointer-events-none"
+      :style="{ zIndex: 3 }"
+    >
+      <LightingOverlay
+        :lighting="lighting"
+        surface="both"
+        :options="options"
+        :simplified="simplified"
+      />
+      <FinalLightingOverlay
+        :lighting="lighting"
+        :options="options"
+        :simplified="simplified"
+        :resolve-asset="resolveAsset"
+      />
+    </div>
+    <div data-lighting-dialog class="cast-layer cast-dialog-layer" :style="{ zIndex: 4 }">
       <GameDialog ref="gameDialogRef" />
     </div>
 
@@ -42,10 +69,17 @@
 </template>
 
 <script setup lang="ts">
+  import { provideSceneLighting } from "@/composables/useSceneLighting";
   import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { GameBackground, GameRolesStage, GameDialog } from "@/components/game/standard";
+  import {
+    GameBackground,
+    GameRolesStage,
+    GameDialog,
+    FinalLightingOverlay,
+    LightingOverlay,
+  } from "@/components/game/standard";
   import { Button } from "@/components/base";
   import SchedulePanel from "@/components/schedule/SchedulePanel.vue";
   import SettingsPanel from "@/components/settings/SettingsPanel.vue";
@@ -75,6 +109,7 @@
     dialogHidden: boolean;
   }
 
+  const { lighting, simplified, options, resolveAsset } = provideSceneLighting();
   const gameStore = useGameStore();
   const uiStore = useUIStore();
 

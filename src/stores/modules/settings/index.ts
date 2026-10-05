@@ -35,6 +35,7 @@ export const DEFAULT_SETTINGS = {
   },
   // 显示设置
   display: {
+    simplifiedLighting: false,
     currentBackground: "@/assets/images/default_bg.jpg", // 当前背景图片
     backgroundEffect: "StarField", // 背景效果名称
     mainMenuStarsEnabled: true, // 主菜单星星粒子开关
@@ -92,6 +93,7 @@ export interface AudioSettings {
   outputDeviceId: string;
 }
 export interface DisplaySettings {
+  simplifiedLighting: boolean;
   currentBackground: string;
   backgroundEffect: string;
   mainMenuStarsEnabled: boolean;

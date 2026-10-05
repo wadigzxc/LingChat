@@ -1,19 +1,52 @@
 <template>
-  <div class="main-box">
+  <div class="main-box" :style="{ isolation: 'isolate' }">
     <!-- 主界面始终渲染，加载动画期间在后台初始化 -->
     <FreeModeTools />
     <FullAccessWarning />
     <GameBackground></GameBackground>
+    <FinalLightingOverlay
+      data-lighting-overall="behind"
+      placement="behind"
+      :lighting="lighting"
+      :options="options"
+      :simplified="simplified"
+      :resolve-asset="resolveAsset"
+      :style="{ zIndex: 1 }"
+    />
     <!-- <GameAvatar ref="gameAvatarRef" @audio-ended="handleAudioFinished" />  -->
     <GameRolesStage
       ref="gameAvatarRef"
       @audio-ended="handleAudioFinished"
       @audio-started="handleAudioStarted"
     />
-    <GameDialog ref="gameDialogRef" @player-continued="manualTriggerContinue" />
+    <div
+      data-lighting-overall="front"
+      class="pointer-events-none absolute inset-0"
+      :style="{ zIndex: 3 }"
+    >
+      <LightingOverlay
+        :lighting="lighting"
+        surface="both"
+        :options="options"
+        :simplified="simplified"
+      />
+      <FinalLightingOverlay
+        :lighting="lighting"
+        :options="options"
+        :simplified="simplified"
+        :resolve-asset="resolveAsset"
+      />
+    </div>
+    <GameDialog
+      data-lighting-dialog
+      :style="{ zIndex: 4 }"
+      ref="gameDialogRef"
+      @player-continued="manualTriggerContinue"
+    />
 
     <!-- 原有的菜单按钮 -->
     <div id="menu-panel" ref="menuPanelRef">
+      <LightingQualityToggle v-show="uiStore.showSettings !== true" />
       <ToolActivityStatus v-if="!(gameStore.runningScript && gameStore.runningScript.isRunning)" />
       <Button
         type="nav"
@@ -49,6 +82,8 @@
 </template>
 
 <script setup lang="ts">
+  import LightingQualityToggle from "@/components/settings/lighting/LightingQualityToggle.vue";
+  import { provideSceneLighting } from "@/composables/useSceneLighting";
   import { getEnvConfigByKey } from "@/api/services/config";
   import FreeModeTools from "@/components/tools/FreeModeTools.vue";
   import ToolActivityStatus from "@/components/tools/ToolActivityStatus.vue";
@@ -59,7 +94,13 @@
   import { useGameStore } from "../../stores/modules/game";
   import { useUIStore } from "../../stores/modules/ui/ui";
   import { Button } from "../base";
-  import { GameBackground, GameDialog, GameRolesStage } from "../game/standard";
+  import {
+    GameBackground,
+    GameDialog,
+    GameRolesStage,
+    FinalLightingOverlay,
+    LightingOverlay,
+  } from "../game/standard";
   import LoadingTransition from "./LoadingTransition.vue";
 
   import FullAccessWarning from "@/components/tools/FullAccessWarning.vue";
@@ -75,6 +116,7 @@
   // 用模块级变量兜底，确保一次启动只播放一次。
   let loadingShownThisSession = false;
 
+  const { lighting, simplified, options, resolveAsset } = provideSceneLighting();
   const router = useRouter();
   const uiStore = useUIStore();
   const gameStore = useGameStore();

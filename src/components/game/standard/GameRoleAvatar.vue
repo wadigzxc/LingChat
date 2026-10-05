@@ -1,24 +1,37 @@
 <template>
-  <Live2DRolePresentation
-    v-if="role.live2d"
-    ref="presentationRef"
-    :role-id="role.roleId"
-    :src="targetAvatarUrl"
-    :layer-style="staticLayerStyle"
-    :animation-classes="containerClasses"
-    :object-fit="computedObjectFit"
-    @animation-end="handleAnimationEnd"
-  />
-  <StaticRolePresentation
-    v-else
-    ref="presentationRef"
-    :src="targetAvatarUrl"
-    :layer-style="staticLayerStyle"
-    :animation-classes="containerClasses"
-    :object-fit="computedObjectFit"
-    @animation-end="handleAnimationEnd"
-  />
-
+  <StaticCharacterLightingFrame
+    :live2d="!!role.live2d"
+    :live2d-ready="live2dReady"
+    :fallback-visible="!live2dReady && role.show && !!targetAvatarUrl"
+    :lighting="lighting"
+    :options="options"
+    :simplified="simplified"
+    :resolve-asset="resolveAsset"
+    class="role-container-transition pointer-events-none absolute h-full w-full origin-[center_0%]"
+    :style="{ ...staticLayerStyle, position: 'absolute' }"
+  >
+    <!-- 空 URL 不会清除 ImageAcrossFade 的旧帧；缺失回退时重建，保证可见性与光影边界一致。 -->
+    <Live2DRolePresentation
+      v-if="role.live2d"
+      :key="targetAvatarUrl ? 'fallback-image' : 'missing-fallback'"
+      ref="presentationRef"
+      :role-id="role.roleId"
+      :src="targetAvatarUrl"
+      :layer-style="{ zIndex: '1' }"
+      :animation-classes="containerClasses"
+      :object-fit="computedObjectFit"
+      @animation-end="handleAnimationEnd"
+    />
+    <StaticRolePresentation
+      v-else
+      ref="presentationRef"
+      :src="targetAvatarUrl"
+      :layer-style="{ zIndex: '1' }"
+      :animation-classes="containerClasses"
+      :object-fit="computedObjectFit"
+      @animation-end="handleAnimationEnd"
+    />
+  </StaticCharacterLightingFrame>
   <!-- 原有气泡、触摸层和情绪音效位于共享 Pixi 舞台上方。 -->
   <TouchAreas v-if="gameStore.command === 'touch'" :body-parts="role.bodyPart" />
   <div
@@ -31,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-  import { ref, computed, watch, nextTick, toRefs } from "vue";
+  import { ref, computed, watch, nextTick, toRefs, inject } from "vue";
   import { invoke } from "@tauri-apps/api/core";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { useGameStore } from "@/stores/modules/game";
@@ -42,6 +55,9 @@
   import StaticRolePresentation from "./StaticRolePresentation.vue";
   import TouchAreas from "./TouchAreas.vue";
   import "./avatar-animation.css";
+  import { live2dStageContextKey } from "../live2d/live2d-stage-context";
+  import { StaticCharacterLightingFrame } from "@/components/game/lighting";
+  import { useSceneLighting } from "@/composables/useSceneLighting";
 
   const props = defineProps<{
     role: GameRole;
@@ -54,7 +70,12 @@
 
   const gameStore = useGameStore();
   const uiStore = useUIStore();
+  const { lighting, simplified, options, resolveAsset } = useSceneLighting();
   const { role } = toRefs(props);
+  const live2dStage = inject(live2dStageContextKey, null);
+  const live2dReady = computed(
+    () => live2dStage?.readyRoleIds.value.has(role.value.roleId) ?? false
+  );
 
   const bubbleAudio = ref<HTMLAudioElement | null>(null);
   const presentationRef = ref<
@@ -103,18 +124,6 @@
     return ((myIndex + 1) / (totalCount + 1)) * 100;
   });
 
-  const lightingFilter = computed(() => {
-    const c = gameStore.currentScene?.lighting?.character;
-    if (!c) return undefined;
-    const parts: string[] = [];
-    if (c.brightness !== 1.0) parts.push(`brightness(${c.brightness})`);
-    if (c.contrast !== 1.0) parts.push(`contrast(${c.contrast})`);
-    if (c.saturation !== 1.0) parts.push(`saturate(${c.saturation})`);
-    if (c.glow_radius > 0) parts.push(`drop-shadow(0 0 ${c.glow_radius}px ${c.glow_color})`);
-    if (c.sepia > 0) parts.push(`sepia(${c.sepia})`);
-    return parts.length > 0 ? parts.join(" ") : undefined;
-  });
-
   const roleLayerStyle = computed(() => {
     const autoLeft = layoutPosition.value;
     // 投屏偏移折进位置（正值右移 / 下移），与 Live2D 同一套夹紧：立绘容器撑满视口、
@@ -142,10 +151,6 @@
       transition:
         "left 0.5s cubic-bezier(0.25, 0.8, 0.5, 1), top 0.3s ease, opacity 0.3s ease-in-out",
     };
-    const filter = lightingFilter.value;
-    if (filter) {
-      style.filter = filter;
-    }
     return style;
   });
 

@@ -1,5 +1,9 @@
 <template>
-  <div class="absolute h-full w-full overflow-hidden">
+  <div
+    data-lighting-stage
+    class="absolute h-full w-full overflow-hidden"
+    :style="{ zIndex: 2, isolation: 'isolate' }"
+  >
     <!-- 1. 所有 Live2D 角色共享一个场景级 Pixi Application -->
     <Live2DStage
       class="z-2"
@@ -21,20 +25,13 @@
       />
     </Live2DStage>
 
-    <!-- 3. 场景光照叠加层 -->
-    <div
-      v-if="lightOverlayStyle"
-      class="pointer-events-none absolute inset-0 z-10"
-      :style="lightOverlayStyle as any"
-    ></div>
-
     <!-- 4. 全局主语音播放器 -->
     <audio ref="mainAudio" @ended="onAudioEnded"></audio>
   </div>
 </template>
 
 <script setup lang="ts">
-  import { computed, ref, watch } from "vue";
+  import { ref, watch } from "vue";
   import { useGameStore } from "@/stores/modules/game";
   import { useUIStore } from "@/stores/modules/ui/ui";
   import { getVoiceAudio } from "@/api/services/game-info";
@@ -60,15 +57,6 @@
 
   const mainAudio = ref<HTMLAudioElement | null>(null);
   const voiceDataUrl = ref("");
-
-  const lightOverlayStyle = computed(() => {
-    // Legacy renderer remains until Task 11/13; runtime state already uses the V2 DTO.
-    const l = gameStore.currentScene?.lighting as Record<string, any> | undefined;
-    if (!l?.overlay_enabled) return undefined;
-    if (l.overlay_target !== "character" && l.overlay_target !== "both") return undefined;
-    const blend = l.blend_mode !== "normal" ? l.blend_mode : "overlay";
-    return `background: radial-gradient(circle at ${l.light_x}% ${l.light_y}%, ${l.overlay_color1} 0%, ${l.overlay_color2} ${l.overlay_radius}%); mix-blend-mode: ${blend}; opacity: ${l.overlay_opacity}`;
-  });
 
   // --- 音频逻辑 (全局) ---
   // 监听 UI Store 的音频播放指令
