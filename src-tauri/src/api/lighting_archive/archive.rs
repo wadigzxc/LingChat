@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use zip::ZipArchive;
@@ -8,6 +7,9 @@ use zip::ZipArchive;
 use super::limits::ArchiveLimits;
 use super::path::{normalize_archive_path, staging_path};
 use super::validate::LingLightError;
+use crate::utils::archive::{
+    ArchiveError, ArchiveFormat, compression_ratio_exceeded, copy_with_limit, detect_format,
+};
 
 pub(crate) fn verify_zip_magic_and_size(
     path: &Path,
@@ -19,14 +21,14 @@ pub(crate) fn verify_zip_magic_and_size(
             limit: max_archive_bytes,
         });
     }
-    let mut file = File::open(path)?;
-    let mut magic = [0_u8; 4];
-    if file.read_exact(&mut magic).is_err()
-        || (magic != [0x50, 0x4b, 0x03, 0x04] && magic != [0x50, 0x4b, 0x05, 0x06])
-    {
-        return Err(LingLightError::NotZip);
+    match detect_format(path) {
+        Ok(ArchiveFormat::Zip) => Ok(()),
+        Ok(ArchiveFormat::SevenZ) | Err(ArchiveError::UnsupportedFormat(_)) => {
+            Err(LingLightError::NotZip)
+        },
+        Err(ArchiveError::Io(error)) => Err(LingLightError::Io(error)),
+        Err(_) => Err(LingLightError::NotZip),
     }
-    Ok(())
 }
 
 pub(crate) fn validate_central_directory_paths(
@@ -104,6 +106,19 @@ pub(crate) fn stage_archive(
     if archive.len() > limits.max_entries {
         return Err(LingLightError::TooManyEntries);
     }
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        if compression_ratio_exceeded(
+            entry.size(),
+            entry.compressed_size(),
+            limits.max_compression_ratio,
+        ) {
+            return Err(LingLightError::CompressionRatioTooHigh {
+                path: entry.name().to_string(),
+                limit: limits.max_compression_ratio,
+            });
+        }
+    }
     let mut raw_paths = HashSet::new();
     let mut normalized_paths = HashSet::new();
     let mut staged = HashMap::new();
@@ -136,20 +151,29 @@ pub(crate) fn stage_archive(
             std::fs::create_dir_all(parent)?;
         }
         let mut writer = File::create(&output)?;
-        let mut buffer = [0_u8; 16 * 1024];
-        loop {
-            let read = entry.read(&mut buffer)?;
-            if read == 0 {
-                break;
-            }
-            total_actual = total_actual.saturating_add(read as u64);
-            if total_actual > limits.max_total_uncompressed_bytes {
+        let total_remaining = limits
+            .max_total_uncompressed_bytes
+            .saturating_sub(total_actual);
+        let entry_limit = if normalized == "manifest.json" {
+            total_remaining.min(limits.max_manifest_bytes)
+        } else {
+            total_remaining
+        };
+        let copied = match copy_with_limit(&mut entry, &mut writer, entry_limit) {
+            Ok(copied) => copied,
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                if normalized == "manifest.json" && limits.max_manifest_bytes <= total_remaining {
+                    return Err(LingLightError::ManifestTooLarge {
+                        limit: limits.max_manifest_bytes,
+                    });
+                }
                 return Err(LingLightError::TotalUncompressedTooLarge {
                     limit: limits.max_total_uncompressed_bytes,
                 });
-            }
-            writer.write_all(&buffer[..read])?;
-        }
+            },
+            Err(error) => return Err(error.into()),
+        };
+        total_actual += copied;
         staged.insert(normalized, output);
     }
     if manifest_count == 0 {

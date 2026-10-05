@@ -1,5 +1,7 @@
 use super::asset::resolve_lighting_asset_in;
-use super::commands::{apply_active_lighting_to_scene, scene_for_runtime};
+use super::commands::{
+    apply_active_lighting_to_scene, preset_request_for_application, scene_for_runtime,
+};
 use super::model::PreviewRuntimeLightingBackup;
 use super::transition::{
     RuntimeLightingRequest, restore_runtime_lighting, transition_runtime_lighting,
@@ -8,6 +10,152 @@ use crate::ai_service::game_system::lighting_presets::{LightingPresetDraft, Ligh
 use crate::ai_service::game_system::scene_store::LightingParams;
 use crate::ai_service::game_system::scene_transition::{SceneLightingSource, SceneRuntimeState};
 use crate::api::game::should_restore_startup_scene;
+
+#[tokio::test]
+async fn preset_application_reads_and_marks_one_latest_snapshot_for_manual_and_ai() {
+    use crate::ai_service::game_system::lighting_presets::LightingPresetUpdate;
+    for source in [
+        SceneLightingSource::ManualPreset,
+        SceneLightingSource::AiPreset,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let store = LightingPresetStore::new(root.path());
+        let preset = store
+            .create(LightingPresetDraft {
+                name: "Selected".into(),
+                ..LightingPresetDraft::default()
+            })
+            .await
+            .unwrap();
+        let mut lighting = LightingParams::default();
+        lighting.master_intensity = 1.7;
+        let updated = store
+            .update(
+                &preset.id,
+                LightingPresetUpdate {
+                    lighting: Some(lighting.clone()),
+                    ..LightingPresetUpdate::default()
+                },
+            )
+            .await
+            .unwrap();
+        let request = preset_request_for_application(&store, &preset.id, source)
+            .await
+            .unwrap();
+        let stored = store.get(&preset.id).await.unwrap().unwrap();
+        assert!(
+            stored.last_used_at.is_some(),
+            "application snapshot must already be marked used"
+        );
+        let transition =
+            transition_runtime_lighting(&SceneRuntimeState::neutral(4), None, request).unwrap();
+        assert_eq!(transition.active_lighting, stored.lighting);
+        assert_eq!(transition.preset_revision, Some(updated.revision));
+        assert_eq!(transition.preset_id.as_deref(), Some(preset.id.as_str()));
+        assert_eq!(transition.source, source);
+        store.delete(&preset.id).await.unwrap();
+        assert_eq!(
+            transition.active_lighting, lighting,
+            "owned applied snapshot survives deletion"
+        );
+        assert!(
+            preset_request_for_application(&store, &preset.id, source)
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn preset_command_entry_points_use_only_the_atomic_application_snapshot() {
+    let source = include_str!("commands.rs");
+    let ai = source
+        .split("pub(crate) async fn apply_lighting_preset_for_service(")
+        .nth(1)
+        .unwrap()
+        .split("async fn apply_lighting_preset_id_for_service(")
+        .next()
+        .unwrap();
+    assert!(ai.contains("apply_lighting_preset_id_for_service"));
+    assert!(ai.contains("&preset.id"));
+    assert!(!ai.contains("preset.lighting"));
+    let manual = source
+        .split("pub async fn apply_lighting_preset(")
+        .nth(1)
+        .unwrap()
+        .split("pub async fn apply_lighting_params(")
+        .next()
+        .unwrap();
+    assert!(manual.contains("apply_lighting_preset_id_for_service"));
+    assert!(!manual.contains(".get("));
+    let shared = source
+        .split("async fn apply_lighting_preset_id_for_service(")
+        .nth(1)
+        .unwrap()
+        .split("#[tauri::command]")
+        .next()
+        .unwrap();
+    assert!(shared.contains("preset_request_for_application(store, id, source).await?"));
+    assert!(
+        !shared.contains("take_for_application"),
+        "must not mark a second snapshot after committing"
+    );
+}
+
+#[tokio::test]
+async fn preset_application_save_failure_returns_no_runtime_request() {
+    let root = tempfile::tempdir().unwrap();
+    let store = LightingPresetStore::new(root.path());
+    let preset = store
+        .create(LightingPresetDraft {
+            name: "Save failure".into(),
+            ..LightingPresetDraft::default()
+        })
+        .await
+        .unwrap();
+    store.fail_next_save_for_test();
+    let error = preset_request_for_application(&store, &preset.id, SceneLightingSource::AiPreset)
+        .await
+        .err()
+        .unwrap();
+    assert!(error.contains("injected preset save failure"));
+    assert!(
+        store
+            .get(&preset.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .last_used_at
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn invalid_preset_application_source_does_not_mark_recent_use() {
+    let root = tempfile::tempdir().unwrap();
+    let store = LightingPresetStore::new(root.path());
+    let preset = store
+        .create(LightingPresetDraft {
+            name: "Invalid source".into(),
+            ..LightingPresetDraft::default()
+        })
+        .await
+        .unwrap();
+    assert!(
+        preset_request_for_application(&store, &preset.id, SceneLightingSource::Neutral)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .get(&preset.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .last_used_at
+            .is_none()
+    );
+}
 
 #[test]
 fn manual_preset_transition_changes_only_runtime_lighting() {
@@ -44,7 +192,7 @@ fn manual_preset_transition_changes_only_runtime_lighting() {
         crate::ai_service::game_system::scene_transition::SceneStatePayload::from(&transition),
     )
     .unwrap();
-    assert_eq!(payload["source"], "manual_preset");
+    assert_eq!(payload["source"], "manual");
     assert_eq!(payload["preset_id"], "user:preset");
     assert_eq!(payload["preset_revision"], 4);
     assert_eq!(payload["lighting_revision"], 8);
@@ -61,6 +209,11 @@ fn ai_preset_uses_the_same_preset_only_transition() {
     assert_eq!(transition.source, SceneLightingSource::AiPreset);
     assert_eq!(transition.preset_id.as_deref(), Some("builtin:neutral"));
     assert_eq!(transition.lighting_revision, 3);
+    let payload = serde_json::to_value(
+        crate::ai_service::game_system::scene_transition::SceneStatePayload::from(&transition),
+    )
+    .unwrap();
+    assert_eq!(payload["source"], "ai");
 }
 
 #[tokio::test]

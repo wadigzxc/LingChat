@@ -172,7 +172,7 @@ async fn commit_rechecks_conflicts_created_after_inspect() {
     .await
     .unwrap_err()
     .to_string();
-    assert!(error.contains("来源不同"));
+    assert!(error.contains("同源"));
 }
 
 #[tokio::test]
@@ -223,7 +223,7 @@ async fn overwrite_requires_same_origin_and_preserves_id() {
         .token;
     let original = commit_linglight_import_inner(
         &first_token,
-        ImportStrategy::OverwriteSameOrigin,
+        ImportStrategy::KeepBoth,
         false,
         &state,
         &store,
@@ -267,7 +267,7 @@ async fn overwrite_requires_same_origin_and_preserves_id() {
         .await
         .unwrap_err()
         .to_string()
-        .contains("来源不同")
+        .contains("同源")
     );
 }
 
@@ -362,6 +362,61 @@ async fn parameter_only_strips_layers_and_returns_warning() {
 }
 
 #[tokio::test]
+async fn optional_future_asset_requires_parameter_only_and_leaves_no_dangling_layer() {
+    let fixture = Fixture::new("Future", "origin-future");
+    write_future_package(&fixture.archive, "Future", "origin-future");
+    let data = tempfile::tempdir().unwrap();
+    let state = LingLightImportState::default();
+    let store = LightingPresetStore::new(data.path());
+
+    let inspection = inspect_linglight_path(&fixture.archive, &state, &store)
+        .await
+        .unwrap();
+    assert_eq!(inspection.assets.len(), 1);
+    assert_eq!(inspection.assets[0].id, "future-1");
+    assert!(
+        inspection
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("video/webm"))
+    );
+    let error = commit_linglight_import_inner(
+        &inspection.token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("仅导入参数"));
+
+    let inspection = inspect_linglight_path(&fixture.archive, &state, &store)
+        .await
+        .unwrap();
+    let result = commit_linglight_import_inner(
+        &inspection.token,
+        ImportStrategy::KeepBoth,
+        true,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap();
+    assert!(result.preset.lighting.asset_layers.is_empty());
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("移除了 1 个素材层"))
+    );
+    assert!(!data.path().join("game_data/lighting_assets").exists());
+}
+
+#[tokio::test]
 async fn preset_save_failure_preserves_old_json_and_shared_assets() {
     let fixture = Fixture::new("Failure", "origin-failure");
     let data = tempfile::tempdir().unwrap();
@@ -423,18 +478,18 @@ fn write_package(path: &std::path::Path, name: &str, origin: &str, png: &[u8]) {
     }]);
     let manifest = json!({
         "format": "linglight", "version": 1,
-        "required_capabilities": [], "optional_capabilities": [],
-        "preset": {
+        "originId": origin, "revision": 2,
+        "metadata": {
             "name": name, "description": "fixture", "aliases": [],
-            "tags": ["test"], "category": "custom", "lighting": lighting
+            "tags": ["test"], "category": "custom"
         },
-        "origin": { "id": origin, "revision": 2, "created_by": "test" },
+        "lighting": lighting,
         "assets": [{
             "id": "layer-1", "path": "assets/untrusted-name.png", "sha256": hash,
-            "byte_size": png.len(), "width": 2, "height": 3,
-            "target": "both", "placement": "behind", "z_index": 0,
-            "opacity": 0.75, "blend_mode": "screen", "fit": "cover", "required": false
-        }]
+            "mediaType": "image/png", "bytes": png.len(), "width": 2, "height": 3,
+            "required": false
+        }],
+        "futureLayers": []
     });
     let file = File::create(path).unwrap();
     let mut zip = ZipWriter::new(file);
@@ -444,6 +499,41 @@ fn write_package(path: &std::path::Path, name: &str, origin: &str, png: &[u8]) {
     zip.start_file("assets/untrusted-name.png", SimpleFileOptions::default())
         .unwrap();
     zip.write_all(png).unwrap();
+    zip.finish().unwrap();
+}
+
+fn write_future_package(path: &std::path::Path, name: &str, origin: &str) {
+    let bytes = b"future webm payload";
+    let hash = format!("{:x}", Sha256::digest(bytes));
+    let mut lighting = serde_json::to_value(LightingParams::default()).unwrap();
+    lighting["asset_layers"] = json!([{
+        "id": "future-1", "asset_hash": hash, "media_type": "video/webm",
+        "target": "both", "placement": "behind", "z_index": 0,
+        "opacity": 0.75, "blend_mode": "screen", "fit": "cover", "required": false
+    }]);
+    let manifest = json!({
+        "format": "linglight", "version": 1,
+        "originId": origin, "revision": 2,
+        "metadata": {
+            "name": name, "description": "fixture", "aliases": [],
+            "tags": ["test"], "category": "custom"
+        },
+        "lighting": lighting,
+        "assets": [{
+            "id": "future-1", "path": "assets/future.webm", "sha256": hash,
+            "mediaType": "video/webm", "bytes": bytes.len(), "width": 2, "height": 3,
+            "required": false
+        }],
+        "futureLayers": []
+    });
+    let file = File::create(path).unwrap();
+    let mut zip = ZipWriter::new(file);
+    zip.start_file("manifest.json", SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(manifest.to_string().as_bytes()).unwrap();
+    zip.start_file("assets/future.webm", SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(bytes).unwrap();
     zip.finish().unwrap();
 }
 

@@ -89,12 +89,7 @@ export interface LightingParams {
   asset_layers: LightingAssetLayer[];
 }
 
-export type SceneLightingSource =
-  | "neutral"
-  | "scene_default"
-  | "manual_preset"
-  | "manual_custom"
-  | "ai_preset";
+export type SceneLightingSource = "neutral" | "scene_default" | "manual" | "ai";
 
 /** `SceneStatePayload.scene` is Rust's persisted Scene, not the UI SceneInfo DTO. */
 export interface SceneStateScene {

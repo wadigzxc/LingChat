@@ -179,9 +179,7 @@ fn cleanup_locked(sessions: &mut HashMap<String, Session>) -> usize {
 mod tests {
     use super::*;
     use crate::ai_service::game_system::lighting::LightingParams;
-    use crate::api::lighting_archive::{
-        LingLightManifest, OriginMetadata, PresetSnapshot, ValidatedLingLight,
-    };
+    use crate::api::lighting_archive::{LingLightManifest, PresetSnapshot, ValidatedLingLight};
 
     fn pending(marker: &std::path::Path) -> PendingImportFixture {
         std::fs::write(marker, b"package").unwrap();
@@ -193,24 +191,21 @@ mod tests {
                 manifest: LingLightManifest {
                     format: "linglight".into(),
                     version: 1,
-                    required_capabilities: vec![],
-                    optional_capabilities: vec![],
-                    preset: PresetSnapshot {
+                    origin_id: Some("origin".into()),
+                    revision: 1,
+                    metadata: PresetSnapshot {
                         name: "test".into(),
                         description: String::new(),
                         aliases: vec![],
                         tags: vec![],
                         category: String::new(),
-                        lighting: LightingParams::default(),
                     },
-                    origin: OriginMetadata {
-                        id: "origin".into(),
-                        revision: 1,
-                        created_by: None,
-                    },
+                    lighting: LightingParams::default(),
                     assets: vec![],
+                    future_layers: vec![],
                 },
                 assets: vec![],
+                unsupported_assets: vec![],
                 warnings: vec![],
                 staging,
             },

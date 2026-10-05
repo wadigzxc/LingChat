@@ -6,6 +6,7 @@ use image::{ImageEncoder as _, RgbaImage, codecs::png::PngEncoder};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
+use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
@@ -29,10 +30,129 @@ fn validates_normal_package_and_stages_png() {
 }
 
 #[test]
+fn validates_legacy_v1_package_emitted_by_previous_exporter() {
+    let fixture = PackageFixture::legacy_v1_exporter();
+
+    let validated = validate_linglight(&fixture.archive, ArchiveLimits::default()).unwrap();
+
+    assert_eq!(validated.manifest.format, "linglight");
+    assert_eq!(validated.manifest.version, 1);
+    assert_eq!(
+        validated.manifest.origin_id.as_deref(),
+        Some("origin-fixture")
+    );
+    assert_eq!(validated.manifest.revision, 2);
+    assert_eq!(validated.manifest.metadata.name, "Warm window");
+    assert_eq!(validated.manifest.assets[0].media_type, "image/png");
+    assert_eq!(
+        validated.manifest.assets[0].byte_size,
+        fixture.png.len() as u64
+    );
+    assert_eq!(validated.assets.len(), 1);
+    assert_eq!(
+        std::fs::read(&validated.assets[0].staged_path).unwrap(),
+        fixture.png
+    );
+}
+
+#[test]
+fn both_v1_shapes_reject_unknown_fields_and_asset_tampering() {
+    for legacy in [false, true] {
+        for pointer in if legacy {
+            vec![
+                "",
+                "/preset",
+                "/origin",
+                "/assets/0",
+                "/preset/lighting",
+                "/preset/lighting/main_light",
+            ]
+        } else {
+            vec![
+                "",
+                "/metadata",
+                "/assets/0",
+                "/lighting",
+                "/lighting/main_light",
+            ]
+        } {
+            let mut fixture = if legacy {
+                PackageFixture::legacy_v1_exporter()
+            } else {
+                PackageFixture::valid()
+            };
+            fixture.manifest.pointer_mut(pointer).unwrap()["unknown_field"] = json!(true);
+            fixture.rewrite_current();
+            assert!(
+                validate_linglight(&fixture.archive, ArchiveLimits::default()).is_err(),
+                "accepted unknown field at {pointer}"
+            );
+        }
+        for field in [
+            "sha256",
+            if legacy { "byte_size" } else { "bytes" },
+            "width",
+            "path",
+        ] {
+            let mut fixture = if legacy {
+                PackageFixture::legacy_v1_exporter()
+            } else {
+                PackageFixture::valid()
+            };
+            fixture.manifest["assets"][0][field] = match field {
+                "sha256" => json!("a".repeat(64)),
+                "path" => json!("../evil.png"),
+                _ => json!(999),
+            };
+            fixture.rewrite_current();
+            assert!(
+                validate_linglight(&fixture.archive, ArchiveLimits::default()).is_err(),
+                "accepted tampered {field}"
+            );
+        }
+    }
+}
+
+#[test]
+fn legacy_v1_checks_duplicated_layout_and_required_capabilities() {
+    for (field, value) in [
+        ("opacity", json!(0.1)),
+        ("target", json!("character")),
+        ("fit", json!("stretch")),
+        ("target", json!("unknown-target")),
+        ("placement", json!("unknown-placement")),
+        ("blend_mode", json!("unknown-blend")),
+        ("fit", json!("unknown-fit")),
+    ] {
+        let mut fixture = PackageFixture::legacy_v1_exporter();
+        fixture.manifest["assets"][0][field] = value;
+        fixture.rewrite_current();
+        assert!(validate_linglight(&fixture.archive, ArchiveLimits::default()).is_err());
+    }
+    let mut fixture = PackageFixture::legacy_v1_exporter();
+    fixture.manifest["required_capabilities"] = json!(["animation"]);
+    fixture.rewrite_current();
+    assert!(matches!(
+        validate_err(&fixture),
+        super::LingLightError::UnsupportedRequiredFutureLayer(_)
+    ));
+    fixture.manifest["required_capabilities"] = json!([]);
+    fixture.manifest["optional_capabilities"] = json!(["animation"]);
+    fixture.rewrite_current();
+    assert_eq!(
+        validate_linglight(&fixture.archive, ArchiveLimits::default())
+            .unwrap()
+            .warnings
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn validates_parameter_only_package_without_assets() {
     let mut fixture = PackageFixture::valid();
     fixture.manifest["assets"] = json!([]);
-    fixture.manifest["preset"]["lighting"]["asset_layers"] = json!([]);
+    fixture.manifest["lighting"]["asset_layers"] = json!([]);
     let manifest = fixture.manifest.to_string();
     fixture.rewrite(&[("manifest.json", manifest.as_bytes())]);
 
@@ -44,7 +164,7 @@ fn validates_parameter_only_package_without_assets() {
 #[test]
 fn rejects_mismatched_task2_layer_layout_semantics() {
     let mut fixture = PackageFixture::valid();
-    fixture.manifest["assets"][0]["placement"] = json!("front");
+    fixture.manifest["assets"][0]["mediaType"] = json!("image/jpeg");
     fixture.rewrite_current();
     assert!(matches!(
         validate_err(&fixture),
@@ -198,6 +318,25 @@ fn rejects_actual_streamed_total_when_zip_header_underreports() {
 }
 
 #[test]
+fn rejects_high_compression_ratio_before_staging() {
+    let mut fixture = PackageFixture::valid();
+    fixture.manifest["assets"] = json!([]);
+    fixture.manifest["lighting"]["asset_layers"] = json!([]);
+    fixture.manifest["metadata"]["description"] = json!("x".repeat(16 * 1024));
+    let manifest = fixture.manifest.to_string();
+    write_zip_deflated(&fixture.archive, &[("manifest.json", manifest.as_bytes())]);
+    let limits = ArchiveLimits {
+        max_compression_ratio: 2,
+        ..ArchiveLimits::default()
+    };
+
+    assert!(matches!(
+        validate_linglight(&fixture.archive, limits).unwrap_err(),
+        super::LingLightError::CompressionRatioTooHigh { .. }
+    ));
+}
+
+#[test]
 fn rejects_archive_body_over_injected_limit() {
     let fixture = PackageFixture::valid();
     let limits = ArchiveLimits {
@@ -207,6 +346,46 @@ fn rejects_archive_body_over_injected_limit() {
     assert!(matches!(
         validate_linglight(&fixture.archive, limits).unwrap_err(),
         super::LingLightError::ArchiveTooLarge { .. }
+    ));
+}
+
+#[test]
+fn rejects_manifest_over_its_independent_limit() {
+    let fixture = PackageFixture::valid();
+    let limits = ArchiveLimits {
+        max_manifest_bytes: 32,
+        ..ArchiveLimits::default()
+    };
+    assert!(matches!(
+        validate_linglight(&fixture.archive, limits).unwrap_err(),
+        super::LingLightError::ManifestTooLarge { .. }
+    ));
+}
+
+#[test]
+fn rejects_oversized_manifest_text_and_list_fields() {
+    let mut long_text = PackageFixture::valid();
+    long_text.manifest["metadata"]["description"] = json!("x".repeat(33));
+    long_text.rewrite_current();
+    let limits = ArchiveLimits {
+        max_text_bytes: 32,
+        ..ArchiveLimits::default()
+    };
+    assert!(matches!(
+        validate_linglight(&long_text.archive, limits).unwrap_err(),
+        super::LingLightError::InvalidManifest(_)
+    ));
+
+    let mut too_many_tags = PackageFixture::valid();
+    too_many_tags.manifest["metadata"]["tags"] = json!(["a", "b", "c"]);
+    too_many_tags.rewrite_current();
+    let limits = ArchiveLimits {
+        max_metadata_items: 2,
+        ..ArchiveLimits::default()
+    };
+    assert!(matches!(
+        validate_linglight(&too_many_tags.archive, limits).unwrap_err(),
+        super::LingLightError::InvalidManifest(_)
     ));
 }
 
@@ -227,7 +406,7 @@ fn rejects_png_over_injected_byte_limit() {
 fn rejects_more_than_eight_layers() {
     let mut fixture = PackageFixture::valid();
     let asset = fixture.manifest["assets"][0].clone();
-    let layer = fixture.manifest["preset"]["lighting"]["asset_layers"][0].clone();
+    let layer = fixture.manifest["lighting"]["asset_layers"][0].clone();
     fixture.manifest["assets"] = Value::Array(
         (0..9)
             .map(|i| {
@@ -238,7 +417,7 @@ fn rejects_more_than_eight_layers() {
             })
             .collect(),
     );
-    fixture.manifest["preset"]["lighting"]["asset_layers"] = Value::Array(
+    fixture.manifest["lighting"]["asset_layers"] = Value::Array(
         (0..9)
             .map(|i| {
                 let mut value = layer.clone();
@@ -307,12 +486,15 @@ fn rejects_extension_and_magic_mismatch() {
 
 #[test]
 fn rejects_hash_size_and_dimension_mismatches() {
-    for field in ["sha256", "byte_size", "width"] {
+    for field in ["sha256", "bytes", "width"] {
         let mut fixture = PackageFixture::valid();
         fixture.manifest["assets"][0][field] = match field {
             "sha256" => json!("00"),
             _ => json!(999),
         };
+        if field == "sha256" {
+            fixture.manifest["lighting"]["asset_layers"][0]["asset_hash"] = json!("00");
+        }
         fixture.rewrite_current();
         assert!(matches!(
             validate_err(&fixture),
@@ -323,11 +505,7 @@ fn rejects_hash_size_and_dimension_mismatches() {
 
 #[test]
 fn rejects_unknown_required_format_version_and_capability() {
-    for (field, value) in [
-        ("format", json!("other")),
-        ("version", json!(2)),
-        ("required_capabilities", json!(["animated_layers"])),
-    ] {
+    for (field, value) in [("format", json!("other")), ("version", json!(2))] {
         let mut fixture = PackageFixture::valid();
         fixture.manifest[field] = value;
         fixture.rewrite_current();
@@ -338,11 +516,117 @@ fn rejects_unknown_required_format_version_and_capability() {
 #[test]
 fn warns_for_unknown_optional_future_capability() {
     let mut fixture = PackageFixture::valid();
-    fixture.manifest["optional_capabilities"] = json!(["animated_layers"]);
+    fixture.manifest["futureLayers"] = json!([{
+        "id": "animated_layers",
+        "required": false
+    }]);
     fixture.rewrite_current();
     let result = validate_linglight(&fixture.archive, ArchiveLimits::default()).unwrap();
     assert_eq!(result.warnings.len(), 1);
     assert!(result.warnings[0].contains("animated_layers"));
+}
+
+#[test]
+fn rejects_unknown_required_future_layer() {
+    let mut fixture = PackageFixture::valid();
+    fixture.manifest["futureLayers"] = json!([{
+        "id": "animated_layers",
+        "required": true
+    }]);
+    fixture.rewrite_current();
+
+    assert!(matches!(
+        validate_err(&fixture),
+        super::LingLightError::UnsupportedRequiredFutureLayer(_)
+    ));
+}
+
+#[test]
+fn inspect_validation_keeps_optional_future_asset_as_warning() {
+    let mut fixture = PackageFixture::valid();
+    let webm = b"future webm payload";
+    let hash = hex_sha256(webm);
+    fixture.manifest["assets"][0]["path"] = json!("assets/animated.webm");
+    fixture.manifest["assets"][0]["sha256"] = json!(hash);
+    fixture.manifest["assets"][0]["bytes"] = json!(webm.len());
+    fixture.manifest["assets"][0]["mediaType"] = json!("video/webm");
+    fixture.manifest["assets"][0]["width"] = json!(1920);
+    fixture.manifest["assets"][0]["height"] = json!(1080);
+    fixture.manifest["lighting"]["asset_layers"][0]["asset_hash"] = json!(hash);
+    fixture.manifest["lighting"]["asset_layers"][0]["media_type"] = json!("video/webm");
+    let manifest = fixture.manifest.to_string();
+    fixture.rewrite(&[
+        ("manifest.json", manifest.as_bytes()),
+        ("assets/animated.webm", webm),
+    ]);
+
+    let validated = validate_linglight(&fixture.archive, ArchiveLimits::default()).unwrap();
+
+    assert!(validated.assets.is_empty());
+    assert_eq!(validated.unsupported_assets.len(), 1);
+    assert_eq!(validated.unsupported_assets[0].id, "layer-1");
+    assert!(
+        validated
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("video/webm"))
+    );
+}
+
+#[test]
+fn rejects_optional_future_asset_with_bad_size_or_hash() {
+    for field in ["bytes", "sha256"] {
+        let mut fixture = PackageFixture::valid();
+        let webm = b"future webm payload";
+        let hash = hex_sha256(webm);
+        fixture.manifest["assets"][0]["path"] = json!("assets/animated.webm");
+        fixture.manifest["assets"][0]["sha256"] = json!(hash);
+        fixture.manifest["assets"][0]["mediaType"] = json!("video/webm");
+        fixture.manifest["assets"][0]["bytes"] = json!(webm.len());
+        fixture.manifest["lighting"]["asset_layers"][0]["asset_hash"] = json!(hash);
+        fixture.manifest["lighting"]["asset_layers"][0]["media_type"] = json!("video/webm");
+        if field == "bytes" {
+            fixture.manifest["assets"][0][field] = json!(999);
+        } else {
+            fixture.manifest["assets"][0][field] = json!("00");
+            fixture.manifest["lighting"]["asset_layers"][0]["asset_hash"] = json!("00");
+        }
+        let manifest = fixture.manifest.to_string();
+        fixture.rewrite(&[
+            ("manifest.json", manifest.as_bytes()),
+            ("assets/animated.webm", webm),
+        ]);
+
+        assert!(matches!(
+            validate_err(&fixture),
+            super::LingLightError::AssetMetadataMismatch { .. }
+        ));
+    }
+}
+
+#[test]
+fn rejects_required_unknown_asset_format() {
+    let mut fixture = PackageFixture::valid();
+    let webm = b"required future payload";
+    let hash = hex_sha256(webm);
+    fixture.manifest["assets"][0]["path"] = json!("assets/required.webm");
+    fixture.manifest["assets"][0]["sha256"] = json!(hash);
+    fixture.manifest["assets"][0]["mediaType"] = json!("video/webm");
+    fixture.manifest["assets"][0]["bytes"] = json!(webm.len());
+    fixture.manifest["assets"][0]["required"] = json!(true);
+    fixture.manifest["lighting"]["asset_layers"][0]["asset_hash"] = json!(hash);
+    fixture.manifest["lighting"]["asset_layers"][0]["media_type"] = json!("video/webm");
+    fixture.manifest["lighting"]["asset_layers"][0]["required"] = json!(true);
+    let manifest = fixture.manifest.to_string();
+    fixture.rewrite(&[
+        ("manifest.json", manifest.as_bytes()),
+        ("assets/required.webm", webm),
+    ]);
+
+    assert!(matches!(
+        validate_err(&fixture),
+        super::LingLightError::UnsupportedRequiredAssetFormat { .. }
+    ));
 }
 
 #[test]
@@ -371,6 +655,36 @@ struct PackageFixture {
 }
 
 impl PackageFixture {
+    // Exact HEAD exporter contract, including duplicated asset layout fields.
+    fn legacy_v1_exporter() -> Self {
+        let mut fixture = Self::valid();
+        let mut preset = fixture.manifest["metadata"].clone();
+        preset["lighting"] = fixture.manifest["lighting"].clone();
+        let mut asset = fixture.manifest["assets"][0].clone();
+        let bytes = asset.as_object_mut().unwrap().remove("bytes").unwrap();
+        asset.as_object_mut().unwrap().remove("mediaType");
+        asset["byte_size"] = bytes;
+        for field in [
+            "target",
+            "placement",
+            "z_index",
+            "opacity",
+            "blend_mode",
+            "fit",
+        ] {
+            asset[field] = fixture.manifest["lighting"]["asset_layers"][0][field].clone();
+        }
+        fixture.manifest = json!({
+            "format": "linglight", "version": 1,
+            "required_capabilities": [], "optional_capabilities": [],
+            "preset": preset,
+            "origin": { "id": "origin-fixture", "revision": 2, "created_by": null },
+            "assets": [asset]
+        });
+        fixture.rewrite_current();
+        fixture
+    }
+
     fn valid() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let archive = temp.path().join("fixture.linglight");
@@ -385,19 +699,19 @@ impl PackageFixture {
         let manifest = json!({
             "format": "linglight",
             "version": 1,
-            "required_capabilities": [],
-            "optional_capabilities": [],
-            "preset": {
+            "originId": "origin-fixture",
+            "revision": 2,
+            "metadata": {
                 "name": "Warm window", "description": "fixture", "aliases": [],
-                "tags": ["warm"], "category": "custom", "lighting": lighting
+                "tags": ["warm"], "category": "custom"
             },
-            "origin": { "id": "origin-fixture", "revision": 2, "created_by": "test" },
+            "lighting": lighting,
             "assets": [{
                 "id": "layer-1", "path": "assets/window.png", "sha256": hash,
-                "byte_size": png.len(), "width": 2, "height": 3,
-                "target": "both", "placement": "behind", "z_index": 0,
-                "opacity": 0.75, "blend_mode": "screen", "fit": "cover", "required": false
-            }]
+                "mediaType": "image/png", "bytes": png.len(), "width": 2, "height": 3,
+                "required": false
+            }],
+            "futureLayers": []
         });
         write_zip(
             &archive,
@@ -447,10 +761,10 @@ fn fixture_corrupt_png() -> PackageFixture {
 fn refresh_asset_metadata(manifest: &mut Value, png: &[u8], width: u32, height: u32) {
     let hash = hex_sha256(png);
     manifest["assets"][0]["sha256"] = json!(hash);
-    manifest["assets"][0]["byte_size"] = json!(png.len());
+    manifest["assets"][0]["bytes"] = json!(png.len());
     manifest["assets"][0]["width"] = json!(width);
     manifest["assets"][0]["height"] = json!(height);
-    manifest["preset"]["lighting"]["asset_layers"][0]["asset_hash"] = json!(hash);
+    manifest["lighting"]["asset_layers"][0]["asset_hash"] = json!(hash);
 }
 
 fn write_zip_owned(path: &Path, manifest: &str, names: &[String], png: &[u8]) {
@@ -566,6 +880,17 @@ fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
     let mut zip = ZipWriter::new(file);
     for (name, bytes) in entries {
         zip.start_file(*name, SimpleFileOptions::default()).unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+fn write_zip_deflated(path: &Path, entries: &[(&str, &[u8])]) {
+    let file = File::create(path).unwrap();
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    for (name, bytes) in entries {
+        zip.start_file(*name, options).unwrap();
         zip.write_all(bytes).unwrap();
     }
     zip.finish().unwrap();

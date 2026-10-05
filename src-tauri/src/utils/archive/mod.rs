@@ -46,7 +46,7 @@ pub const MAX_ENTRY_COUNT: usize = 1000;
 /// 单条目压缩比上限（解压后字节 / 压缩前字节）。
 ///
 /// 经验值 100 足以应对正常 deflate 条目，同时击退 42.zip / 35.zip 类递归炸弹。
-/// 压缩大小为 0 时跳过此检查（避免异常元数据误报）。
+/// 非空条目的压缩大小为 0 时按异常元数据拒绝（fail closed）。
 pub const MAX_COMPRESSION_RATIO: u64 = 100;
 
 // 文件名最大字节数；超出由 [`sanitize_entry_name`] 拒绝。
@@ -252,6 +252,7 @@ pub use import_state::{ArchiveImportState, ImportTaskEntry};
 pub(crate) use import_state::{ImportingGuard, TaskRemoveGuard};
 pub use resolve::resolve_target;
 pub use safety::{check_entry_safety, safe_join, sanitize_entry_name};
+pub(crate) use safety::{compression_ratio_exceeded, copy_with_limit};
 pub use staging::{copy_dir_recursive, list_content_entries, locate_extracted_root, relocate_dir};
 
 pub(super) fn map_sevenz_err(e: sevenz_rust2::Error) -> ArchiveError {

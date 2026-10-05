@@ -5,6 +5,152 @@ import { useUserStore } from "../../../stores/modules/user/user";
 import { useGameStore } from "../../../stores/modules/game";
 
 import type * as ScriptTypes from "../../../types/script";
+import type { SceneStateProjectionPayload } from "@/utils/scene-lighting/scene-state";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isRevision(value: unknown): boolean {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function nullableString(value: unknown): boolean {
+  return value === null || typeof value === "string";
+}
+
+function hasFields(
+  value: unknown,
+  numbers: string[],
+  strings: string[],
+  booleans: string[] = []
+): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    numbers.every((key) => typeof value[key] === "number" && Number.isFinite(value[key])) &&
+    strings.every((key) => typeof value[key] === "string") &&
+    booleans.every((key) => typeof value[key] === "boolean")
+  );
+}
+
+function isLighting(value: unknown): boolean {
+  if (
+    !hasFields(value, ["master_intensity"], [], ["enabled", "link_character_background"]) ||
+    value.schema_version !== 2
+  )
+    return false;
+  const target = (v: unknown) => ["character", "background", "both"].includes(v as string);
+  const blend = (v: unknown) =>
+    ["screen", "add", "overlay", "soft_light", "multiply", "normal"].includes(v as string);
+  const filter = (v: unknown) =>
+    hasFields(v, ["brightness", "contrast", "saturation", "sepia", "glow_radius"], ["glow_color"]);
+  const ambient = (v: unknown) => hasFields(v, ["opacity"], ["color"], ["enabled"]);
+  const main = value.main_light;
+  const bloom = value.bloom;
+  return (
+    filter(value.character) &&
+    filter(value.background) &&
+    ambient(value.character_ambient) &&
+    ambient(value.background_ambient) &&
+    hasFields(
+      main,
+      ["x", "y", "angle", "radius", "opacity"],
+      ["color_start", "color_end"],
+      ["enabled"]
+    ) &&
+    ["linear", "radial"].includes(main.shape as string) &&
+    target(main.target) &&
+    blend(main.blend_mode) &&
+    hasFields(
+      value.rim_light,
+      ["intensity", "width", "softness", "angle", "offset"],
+      ["color"],
+      ["enabled"]
+    ) &&
+    hasFields(bloom, ["radius", "intensity"], ["color"], ["enabled"]) &&
+    target(bloom.target) &&
+    hasFields(value.vignette, ["intensity", "radius", "softness"], ["color"], ["enabled"]) &&
+    Array.isArray(value.asset_layers) &&
+    value.asset_layers.every(
+      (layer) =>
+        hasFields(
+          layer,
+          ["z_index", "opacity"],
+          ["id", "asset_hash", "media_type"],
+          ["required"]
+        ) &&
+        Number.isSafeInteger(layer.z_index) &&
+        target(layer.target) &&
+        blend(layer.blend_mode) &&
+        ["front", "behind"].includes(layer.placement as string) &&
+        ["contain", "stretch", "cover"].includes(layer.fit as string)
+    )
+  );
+}
+
+function isScene(value: unknown): boolean {
+  if (value === null) return true;
+  if (!isRecord(value)) return false;
+  const uiScene = "scene_name" in value;
+  return (
+    hasFields(
+      value,
+      [],
+      [
+        "id",
+        uiScene ? "scene_name" : "name",
+        uiScene ? "scene_description" : "description",
+        "created_at",
+        "updated_at",
+      ],
+      ["lighting_customized"]
+    ) &&
+    (uiScene ? nullableString(value.background) : typeof value.background === "string") &&
+    (value.lighting === null || isLighting(value.lighting)) &&
+    nullableString(value.lighting_preset_id) &&
+    (value.lighting_preset_revision === null || isRevision(value.lighting_preset_revision)) &&
+    (value.plugin_id === undefined || nullableString(value.plugin_id)) &&
+    (!uiScene || typeof value.source === "string")
+  );
+}
+
+function isCompleteSceneStatePayload(data: unknown): data is SceneStateProjectionPayload {
+  if (!isRecord(data)) return false;
+  return (
+    isScene(data.scene) &&
+    typeof data.background === "string" &&
+    isLighting(data.active_lighting) &&
+    ["neutral", "scene_default", "manual", "ai"].includes(data.source as string) &&
+    nullableString(data.preset_id) &&
+    (data.preset_revision === null || isRevision(data.preset_revision)) &&
+    typeof data.customized === "boolean" &&
+    isRevision(data.lighting_revision)
+  );
+}
+
+/**
+ * `scene_change` predates the revisioned Tauri scene event. New senders may provide the
+ * complete payload and must use the same authoritative reducer; old senders only carry
+ * `scene`, so they update the local projection without changing revision authority.
+ */
+export function applySceneChangeMessage(data: unknown): void {
+  if (!data || typeof data !== "object") return;
+  const gameStore = useGameStore();
+  if (isCompleteSceneStatePayload(data)) {
+    gameStore.applySceneState(data);
+    return;
+  }
+  // A revision marker opts the sender into the authoritative payload contract. Never
+  // reinterpret an incomplete revisioned message as legacy, because that would bypass
+  // the reducer and partially mutate scene state without its matching lighting state.
+  if ("lighting_revision" in data) return;
+  const legacy = data as { scene?: unknown };
+  if ("scene" in legacy) {
+    gameStore.applyCurrentScene(
+      (legacy.scene ?? null) as Parameters<typeof gameStore.applyCurrentScene>[0]
+    );
+  }
+}
 
 export class ScriptHandler {
   constructor() {
@@ -117,11 +263,7 @@ export class ScriptHandler {
     // 场景切换事件
     registerHandler(WebSocketMessageTypes.SCENE_CHANGE, (data: any) => {
       console.log("收到场景切换事件:", data);
-      const gameStore = useGameStore();
-
-      if (data.scene) {
-        gameStore.applyCurrentScene(data.scene);
-      }
+      applySceneChangeMessage(data);
     });
   }
 

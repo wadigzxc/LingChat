@@ -6,6 +6,7 @@
 //! - [`safe_join`] 目标子树二次路径逃逸校验
 //! - [`is_macos_metadata`] macOS 元数据条目识别（私有 helper）
 
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use super::{ArchiveError, MAX_COMPRESSION_RATIO, MAX_ENTRY_COUNT};
@@ -28,7 +29,7 @@ const MAX_NAME_LEN: usize = 4096;
 /// # 返回
 /// - `Ok(())`：通过检查
 /// - `Err(TooManyEntries)`：序号 ≥ [`MAX_ENTRY_COUNT`]
-/// - `Err(CompressionRatio{..})`：解压后/压缩前 > [`MAX_COMPRESSION_RATIO`]；压缩字节为 0 时跳过此检查
+/// - `Err(CompressionRatio{..})`：解压后/压缩前 > [`MAX_COMPRESSION_RATIO`]；非空条目压缩字节为 0 时也拒绝
 pub fn check_entry_safety(
     entry_index: usize,
     entry_compressed: u64,
@@ -37,13 +38,39 @@ pub fn check_entry_safety(
     if entry_index >= MAX_ENTRY_COUNT {
         return Err(ArchiveError::TooManyEntries(entry_index));
     }
-    if entry_compressed > 0 && entry_uncompressed / entry_compressed > MAX_COMPRESSION_RATIO {
+    if compression_ratio_exceeded(entry_uncompressed, entry_compressed, MAX_COMPRESSION_RATIO) {
         return Err(ArchiveError::CompressionRatio {
             actual: entry_uncompressed,
             compressed: entry_compressed,
         });
     }
     Ok(())
+}
+
+pub(crate) fn compression_ratio_exceeded(
+    uncompressed: u64,
+    compressed: u64,
+    max_ratio: u64,
+) -> bool {
+    compressed == 0 && uncompressed > 0
+        || compressed > 0
+            && u128::from(uncompressed) > u128::from(compressed) * u128::from(max_ratio)
+}
+
+pub(crate) fn copy_with_limit(
+    reader: &mut impl Read,
+    writer: &mut impl Write,
+    remaining: u64,
+) -> io::Result<u64> {
+    let probe_limit = remaining.saturating_add(1);
+    let copied = io::copy(&mut reader.take(probe_limit), writer)?;
+    if copied > remaining {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "actual uncompressed data exceeds limit",
+        ));
+    }
+    Ok(copied)
 }
 
 // ===== 3. 路径清洗与安全拼接 =====
@@ -138,4 +165,26 @@ pub fn safe_join(dest_root: &Path, cleaned_name: &str) -> Result<PathBuf, Archiv
         )));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compression_ratio_check_handles_extreme_values_without_overflow() {
+        assert!(!compression_ratio_exceeded(u64::MAX, u64::MAX / 2, 3));
+        assert!(!compression_ratio_exceeded(300, 3, 100));
+        assert!(compression_ratio_exceeded(301, 3, 100));
+    }
+
+    #[test]
+    fn limited_copy_reads_only_one_probe_byte_past_remaining() {
+        let mut input = std::io::Cursor::new(vec![7_u8; 1024]);
+        let mut output = Vec::new();
+        let error = copy_with_limit(&mut input, &mut output, 10).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(input.position(), 11);
+        assert_eq!(output.len(), 11);
+    }
 }

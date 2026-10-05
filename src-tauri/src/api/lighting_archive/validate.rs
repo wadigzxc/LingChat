@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 use super::archive::{stage_archive, validate_central_directory_paths, verify_zip_magic_and_size};
@@ -13,8 +14,15 @@ use super::png::validate_asset;
 pub struct ValidatedLingLight {
     pub manifest: LingLightManifest,
     pub assets: Vec<StagedAsset>,
+    pub unsupported_assets: Vec<UnsupportedAsset>,
     pub warnings: Vec<String>,
     pub staging: TempDir,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnsupportedAsset {
+    pub id: String,
+    pub media_type: String,
 }
 
 #[derive(Debug, Clone)]
@@ -52,12 +60,18 @@ pub enum LingLightError {
     TooManyEntries,
     #[error("actual uncompressed data exceeds {limit} bytes")]
     TotalUncompressedTooLarge { limit: u64 },
+    #[error("manifest.json exceeds {limit} bytes")]
+    ManifestTooLarge { limit: u64 },
+    #[error("archive entry compression ratio exceeds {limit}: {path}")]
+    CompressionRatioTooHigh { path: String, limit: u64 },
     #[error("invalid manifest: {0}")]
     InvalidManifest(String),
     #[error("unsupported required format {format} version {version}")]
     UnsupportedFormat { format: String, version: u32 },
-    #[error("unsupported required capability: {0}")]
-    UnsupportedRequiredCapability(String),
+    #[error("unsupported required future layer: {0}")]
+    UnsupportedRequiredFutureLayer(String),
+    #[error("unsupported required asset format for {id}: {media_type}")]
+    UnsupportedRequiredAssetFormat { id: String, media_type: String },
     #[error("too many asset layers: {actual}, limit {limit}")]
     TooManyLayers { actual: usize, limit: usize },
     #[error("asset is missing from archive: {0}")]
@@ -107,6 +121,7 @@ pub fn validate_linglight(
     let manifest: LingLightManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| LingLightError::InvalidManifest(error.to_string()))?;
     validate_manifest_header(&manifest)?;
+    validate_manifest_shape(&manifest, limits)?;
     if manifest.assets.len() > limits.max_layers {
         return Err(LingLightError::TooManyLayers {
             actual: manifest.assets.len(),
@@ -126,14 +141,9 @@ pub fn validate_linglight(
         return Err(LingLightError::UnexpectedFile(unexpected));
     }
 
-    let warnings = manifest
-        .optional_capabilities
-        .iter()
-        .map(|capability| {
-            format!("optional capability '{capability}' is not supported and was ignored")
-        })
-        .collect();
+    let (mut warnings, mut unsupported_assets) = validate_future_layers(&manifest)?;
 
+    validate_layer_layouts(&manifest)?;
     let mut ids = HashSet::new();
     let mut assets = Vec::with_capacity(manifest.assets.len());
     for declared in &manifest.assets {
@@ -150,16 +160,55 @@ pub fn validate_linglight(
         let staged_path = staged_files
             .get(&declared.path)
             .ok_or_else(|| LingLightError::MissingAsset(declared.path.clone()))?;
-        assets.push(validate_asset(declared, staged_path, limits)?);
+        if declared.media_type != "image/png" {
+            if declared.required {
+                return Err(LingLightError::UnsupportedRequiredAssetFormat {
+                    id: declared.id.clone(),
+                    media_type: declared.media_type.clone(),
+                });
+            }
+            validate_unsupported_asset_metadata(declared, staged_path)?;
+            warnings.push(format!(
+                "optional asset '{}' uses unsupported format '{}' and requires parameter-only import",
+                declared.id, declared.media_type
+            ));
+            unsupported_assets.push(UnsupportedAsset {
+                id: declared.id.clone(),
+                media_type: declared.media_type.clone(),
+            });
+        } else {
+            assets.push(validate_asset(declared, staged_path, limits)?);
+        }
     }
-    validate_layer_layouts(&manifest)?;
 
     Ok(ValidatedLingLight {
         manifest,
         assets,
+        unsupported_assets,
         warnings,
         staging,
     })
+}
+
+fn validate_unsupported_asset_metadata(
+    declared: &super::model::ManifestAsset,
+    staged_path: &Path,
+) -> Result<(), LingLightError> {
+    let bytes = std::fs::read(staged_path)?;
+    if declared.byte_size != bytes.len() as u64 {
+        return Err(LingLightError::AssetMetadataMismatch {
+            path: declared.path.clone(),
+            field: "byte_size",
+        });
+    }
+    let actual_hash = format!("{:x}", Sha256::digest(&bytes));
+    if declared.sha256 != actual_hash {
+        return Err(LingLightError::AssetMetadataMismatch {
+            path: declared.path.clone(),
+            field: "sha256",
+        });
+    }
+    Ok(())
 }
 
 fn validate_manifest_header(manifest: &LingLightManifest) -> Result<(), LingLightError> {
@@ -169,23 +218,100 @@ fn validate_manifest_header(manifest: &LingLightManifest) -> Result<(), LingLigh
             version: manifest.version,
         });
     }
-    if let Some(capability) = manifest.required_capabilities.first() {
-        return Err(LingLightError::UnsupportedRequiredCapability(
-            capability.clone(),
+    Ok(())
+}
+
+fn validate_manifest_shape(
+    manifest: &LingLightManifest,
+    limits: ArchiveLimits,
+) -> Result<(), LingLightError> {
+    let metadata = &manifest.metadata;
+    for (field, value) in [
+        ("originId", manifest.origin_id.as_deref().unwrap_or("")),
+        ("metadata.name", metadata.name.as_str()),
+        ("metadata.description", metadata.description.as_str()),
+        ("metadata.category", metadata.category.as_str()),
+    ] {
+        validate_text(field, value, limits.max_text_bytes)?;
+    }
+    for (field, values) in [
+        ("metadata.aliases", metadata.aliases.as_slice()),
+        ("metadata.tags", metadata.tags.as_slice()),
+    ] {
+        if values.len() > limits.max_metadata_items {
+            return Err(LingLightError::InvalidManifest(format!(
+                "{field} has too many items"
+            )));
+        }
+        for value in values {
+            validate_text(field, value, limits.max_text_bytes)?;
+        }
+    }
+    if manifest.future_layers.len() > limits.max_layers {
+        return Err(LingLightError::InvalidManifest(
+            "futureLayers has too many items".to_string(),
         ));
+    }
+    for asset in &manifest.assets {
+        for (field, value) in [
+            ("assets[].id", asset.id.as_str()),
+            ("assets[].path", asset.path.as_str()),
+            ("assets[].sha256", asset.sha256.as_str()),
+            ("assets[].mediaType", asset.media_type.as_str()),
+        ] {
+            validate_text(field, value, limits.max_text_bytes)?;
+        }
     }
     Ok(())
 }
 
+fn validate_text(field: &str, value: &str, max_bytes: usize) -> Result<(), LingLightError> {
+    if value.len() > max_bytes {
+        return Err(LingLightError::InvalidManifest(format!(
+            "{field} exceeds {max_bytes} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_future_layers(
+    manifest: &LingLightManifest,
+) -> Result<(Vec<String>, Vec<UnsupportedAsset>), LingLightError> {
+    let mut warnings = Vec::with_capacity(manifest.future_layers.len());
+    let mut unsupported = Vec::with_capacity(manifest.future_layers.len());
+    for (index, layer) in manifest.future_layers.iter().enumerate() {
+        let name = layer
+            .get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unnamed");
+        if layer.get("required").and_then(|value| value.as_bool()) != Some(false) {
+            return Err(LingLightError::UnsupportedRequiredFutureLayer(format!(
+                "{name} at index {index}"
+            )));
+        }
+        warnings.push(format!(
+            "optional future layer '{name}' is unsupported and requires parameter-only import"
+        ));
+        unsupported.push(UnsupportedAsset {
+            id: name.to_string(),
+            media_type: layer
+                .get("mediaType")
+                .and_then(|value| value.as_str())
+                .unwrap_or("future-layer")
+                .to_string(),
+        });
+    }
+    Ok((warnings, unsupported))
+}
+
 fn validate_layer_layouts(manifest: &LingLightManifest) -> Result<(), LingLightError> {
-    if manifest.preset.lighting.asset_layers.len() != manifest.assets.len() {
+    if manifest.lighting.asset_layers.len() != manifest.assets.len() {
         return Err(LingLightError::LayerLayoutMismatch(
             "preset layer count differs from asset declarations".to_string(),
         ));
     }
     for asset in &manifest.assets {
         let Some(layer) = manifest
-            .preset
             .lighting
             .asset_layers
             .iter()
@@ -194,13 +320,7 @@ fn validate_layer_layouts(manifest: &LingLightManifest) -> Result<(), LingLightE
             return Err(LingLightError::LayerLayoutMismatch(asset.id.clone()));
         };
         if layer.asset_hash != asset.sha256
-            || layer.media_type != "image/png"
-            || layer.target != asset.target
-            || layer.placement != asset.placement
-            || layer.z_index != asset.z_index
-            || layer.opacity != asset.opacity
-            || layer.blend_mode != asset.blend_mode
-            || layer.fit != asset.fit
+            || layer.media_type != asset.media_type
             || layer.required != asset.required
         {
             return Err(LingLightError::LayerLayoutMismatch(asset.id.clone()));

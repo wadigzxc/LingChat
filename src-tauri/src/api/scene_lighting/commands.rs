@@ -44,19 +44,51 @@ pub(crate) fn apply_active_lighting_to_scene(
     scene.updated_at = updated_at;
 }
 
-async fn apply_runtime_request_for_service(
-    app: &AppHandle,
+async fn commit_runtime_request_for_service<F>(
     service: &AIService,
-    request: RuntimeLightingRequest,
-) -> Result<SceneStatePayload, String> {
-    let current = service.game_status.lock().await.scene_runtime_state();
-    let scene = scene_for_runtime(&service.data_dir, current.current_scene_id.as_deref())?;
-    let transition = transition_runtime_lighting(&current, scene, request)?;
-    let payload = SceneStatePayload::from(&transition);
+    make_request: F,
+) -> Result<SceneStatePayload, String>
+where
+    F: FnOnce(
+        &crate::ai_service::game_system::scene_transition::SceneRuntimeState,
+    ) -> RuntimeLightingRequest,
+{
     let mut game_status = service.game_status.lock().await;
-    crate::api::scene::emit_scene_state(app, &payload)?;
+    let current = game_status.scene_runtime_state();
+    let scene = scene_for_runtime(&service.data_dir, current.current_scene_id.as_deref())?;
+    let transition = transition_runtime_lighting(&current, scene, make_request(&current))?;
+    let payload = SceneStatePayload::from(&transition);
     game_status.apply_scene_transition(&transition);
+    drop(game_status);
     Ok(payload)
+}
+
+/// Atomically retrieve and mark the sole snapshot used by manual and AI application.
+pub(crate) async fn preset_request_for_application(
+    store: &LightingPresetStore,
+    id: &str,
+    source: SceneLightingSource,
+) -> Result<RuntimeLightingRequest, String> {
+    if !matches!(
+        source,
+        SceneLightingSource::ManualPreset | SceneLightingSource::AiPreset
+    ) {
+        return Err("预设应用来源必须是 manual_preset 或 ai_preset".into());
+    }
+    let preset = store
+        .take_for_application(id)
+        .await
+        .map_err(error_text)?
+        .ok_or_else(|| format!("光影预设不存在: {id}"))?;
+    Ok(match source {
+        SceneLightingSource::ManualPreset => {
+            RuntimeLightingRequest::manual_preset(preset.lighting, preset.id, preset.revision)
+        },
+        SceneLightingSource::AiPreset => {
+            RuntimeLightingRequest::ai_preset(preset.lighting, preset.id, preset.revision)
+        },
+        _ => unreachable!("validated preset source"),
+    })
 }
 
 /// Shared by manual commands and Task 9. AI callers can select a preset through
@@ -67,16 +99,23 @@ pub(crate) async fn apply_lighting_preset_for_service(
     preset: LightingPreset,
     source: SceneLightingSource,
 ) -> Result<SceneStatePayload, String> {
-    let request = match source {
-        SceneLightingSource::ManualPreset => {
-            RuntimeLightingRequest::manual_preset(preset.lighting, preset.id, preset.revision)
-        },
-        SceneLightingSource::AiPreset => {
-            RuntimeLightingRequest::ai_preset(preset.lighting, preset.id, preset.revision)
-        },
-        _ => return Err("预设应用来源必须是 manual_preset 或 ai_preset".to_string()),
-    };
-    apply_runtime_request_for_service(app, service, request).await
+    // AI selection may be stale after matching; only its ID crosses this boundary.
+    // Resolve the application snapshot anew through the same entry as manual use.
+    let store = app.state::<LightingPresetStore>();
+    apply_lighting_preset_id_for_service(app, service, &store, &preset.id, source).await
+}
+
+async fn apply_lighting_preset_id_for_service(
+    app: &AppHandle,
+    service: &AIService,
+    store: &LightingPresetStore,
+    id: &str,
+    source: SceneLightingSource,
+) -> Result<SceneStatePayload, String> {
+    let request = preset_request_for_application(store, id, source).await?;
+    let payload = commit_runtime_request_for_service(service, move |_| request).await?;
+    crate::api::scene::emit_scene_state(app, &payload)?;
+    Ok(payload)
 }
 
 #[tauri::command]
@@ -125,15 +164,16 @@ pub async fn apply_lighting_preset(
     id: String,
     store: State<'_, LightingPresetStore>,
 ) -> Result<SceneStatePayload, String> {
-    let preset = store
-        .get(&id)
-        .await
-        .map_err(error_text)?
-        .ok_or_else(|| format!("光影预设不存在: {id}"))?;
     let state = app.state::<AppState>();
     let service = state.ai_service.lock().await;
-    apply_lighting_preset_for_service(&app, &service, preset, SceneLightingSource::ManualPreset)
-        .await
+    apply_lighting_preset_id_for_service(
+        &app,
+        &service,
+        &store,
+        &id,
+        SceneLightingSource::ManualPreset,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -143,26 +183,26 @@ pub async fn apply_lighting_params(
 ) -> Result<SceneStatePayload, String> {
     let state = app.state::<AppState>();
     let service = state.ai_service.lock().await;
-    let current = service.game_status.lock().await.scene_runtime_state();
-    apply_runtime_request_for_service(
-        &app,
-        &service,
-        RuntimeLightingRequest::manual_custom_from(&current, lighting),
-    )
-    .await
+    let payload = commit_runtime_request_for_service(&service, move |current| {
+        RuntimeLightingRequest::manual_custom_from(current, lighting)
+    })
+    .await?;
+    crate::api::scene::emit_scene_state(&app, &payload)?;
+    Ok(payload)
 }
 
 #[tauri::command]
 pub async fn restore_scene_lighting(app: AppHandle) -> Result<SceneStatePayload, String> {
     let state = app.state::<AppState>();
     let service = state.ai_service.lock().await;
-    let current = service.game_status.lock().await.scene_runtime_state();
+    let mut game_status = service.game_status.lock().await;
+    let current = game_status.scene_runtime_state();
     let scene = scene_for_runtime(&service.data_dir, current.current_scene_id.as_deref())?;
     let transition = restore_runtime_lighting(&current, scene)?;
     let payload = SceneStatePayload::from(&transition);
-    let mut game_status = service.game_status.lock().await;
-    crate::api::scene::emit_scene_state(&app, &payload)?;
     game_status.apply_scene_transition(&transition);
+    drop(game_status);
+    crate::api::scene::emit_scene_state(&app, &payload)?;
     Ok(payload)
 }
 
@@ -179,14 +219,16 @@ pub async fn save_active_lighting_as_scene_default(
         .ok_or_else(|| "当前没有场景，无法保存默认光影".to_string())?;
 
     let store = SceneStore::new(&service.data_dir);
-    let mut scenes = store.load_all().map_err(error_text)?;
-    let scene = scenes
-        .iter_mut()
-        .find(|scene| scene.id == scene_id)
-        .ok_or_else(|| "当前场景不存在，无法保存默认光影".to_string())?;
-    apply_active_lighting_to_scene(scene, &runtime, chrono::Utc::now().to_rfc3339());
-    let saved = scene.clone();
-    store.save_all(&scenes).map_err(error_text)?;
+    let saved = store
+        .mutate(|scenes| {
+            let scene = scenes
+                .iter_mut()
+                .find(|scene| scene.id == scene_id)
+                .ok_or_else(|| anyhow::anyhow!("当前场景不存在，无法保存默认光影"))?;
+            apply_active_lighting_to_scene(scene, &runtime, chrono::Utc::now().to_rfc3339());
+            Ok(scene.clone())
+        })
+        .map_err(error_text)?;
 
     crate::api::scene::apply_scene_selection_for_service(&app, &service, Some(&saved)).await
 }

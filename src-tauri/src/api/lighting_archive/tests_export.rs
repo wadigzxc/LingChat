@@ -37,10 +37,10 @@ async fn exports_parameter_only_user_preset_and_round_trips() {
         .unwrap();
     let validated = validate_linglight(&result.path, ArchiveLimits::default()).unwrap();
 
-    assert_eq!(validated.manifest.preset.name, preset.name);
-    assert_eq!(validated.manifest.preset.aliases, preset.aliases);
-    assert_eq!(validated.manifest.preset.lighting, preset.lighting);
-    assert_eq!(validated.manifest.origin.id, preset.origin_id.unwrap());
+    assert_eq!(validated.manifest.metadata.name, preset.name);
+    assert_eq!(validated.manifest.metadata.aliases, preset.aliases);
+    assert_eq!(validated.manifest.lighting, preset.lighting);
+    assert_eq!(validated.manifest.origin_id, preset.origin_id);
     assert!(validated.assets.is_empty());
 }
 
@@ -80,7 +80,7 @@ async fn exports_png_and_preserves_asset_hash_on_round_trip() {
 
     assert_eq!(validated.assets.len(), 1);
     assert_eq!(validated.assets[0].sha256, hash);
-    assert_eq!(validated.manifest.preset.lighting, preset.lighting);
+    assert_eq!(validated.manifest.lighting, preset.lighting);
     assert_eq!(
         std::fs::read(&validated.assets[0].staged_path).unwrap(),
         png
@@ -287,6 +287,34 @@ async fn manifest_omits_local_paths_scene_fields_and_internal_timestamps() {
         .unwrap()
         .read_to_string(&mut manifest)
         .unwrap();
+    let wire: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    let object = wire.as_object().unwrap();
+    for required in [
+        "format",
+        "version",
+        "originId",
+        "revision",
+        "metadata",
+        "lighting",
+        "assets",
+        "futureLayers",
+    ] {
+        assert!(
+            object.contains_key(required),
+            "missing {required}: {manifest}"
+        );
+    }
+    for legacy in [
+        "origin",
+        "preset",
+        "required_capabilities",
+        "optional_capabilities",
+    ] {
+        assert!(
+            !object.contains_key(legacy),
+            "legacy key {legacy}: {manifest}"
+        );
+    }
     for forbidden in [
         data.path().to_string_lossy().as_ref(),
         "created_at",

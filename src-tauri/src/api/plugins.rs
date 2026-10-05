@@ -289,27 +289,26 @@ async fn sync_plugin_scenes_cmd(app: &AppHandle) {
         .await;
     let data_dir = crate::api::data_dir();
     let store = SceneStore::new(&data_dir);
-    let Ok(mut scenes) = store.load_all() else {
-        return;
-    };
-    // 先移除所有旧的插件场景，再按当前可见集合重建（幂等）
-    scenes.retain(|s| s.plugin_id.is_none());
-    for e in entries {
-        scenes.push(Scene {
-            id: format!("plugin:{}/{}", e.plugin_id, e.key),
-            name: e.name.clone(),
-            description: String::new(),
-            background: e.path.to_string_lossy().into_owned(),
-            lighting: None,
-            lighting_preset_id: None,
-            lighting_preset_revision: None,
-            lighting_customized: false,
-            created_at: String::new(),
-            updated_at: String::new(),
-            plugin_id: Some(e.plugin_id.clone()),
-        });
-    }
-    if let Err(err) = store.save_all(&scenes) {
+    if let Err(err) = store.mutate(|scenes| {
+        // 先移除所有旧的插件场景，再按当前可见集合重建（幂等）
+        scenes.retain(|s| s.plugin_id.is_none());
+        for e in entries {
+            scenes.push(Scene {
+                id: format!("plugin:{}/{}", e.plugin_id, e.key),
+                name: e.name.clone(),
+                description: String::new(),
+                background: e.path.to_string_lossy().into_owned(),
+                lighting: None,
+                lighting_preset_id: None,
+                lighting_preset_revision: None,
+                lighting_customized: false,
+                created_at: String::new(),
+                updated_at: String::new(),
+                plugin_id: Some(e.plugin_id.clone()),
+            });
+        }
+        Ok(())
+    }) {
         tracing::warn!("[PluginResources] 写入插件场景失败: {err}");
     }
 }

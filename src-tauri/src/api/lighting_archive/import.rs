@@ -84,21 +84,22 @@ pub async fn inspect_linglight_path(
     let presets = store.list(PresetSort::Name).await?;
     let conflicts = detect_conflicts(&validated, &presets);
     let mut warnings = validated.warnings.clone();
-    if !validated.assets.is_empty() {
+    if !validated.manifest.lighting.asset_layers.is_empty() {
         warnings.push(format!(
             "仅导入参数将移除 {} 个素材层和全部资源引用",
-            validated.assets.len()
+            validated.manifest.lighting.asset_layers.len()
         ));
     }
     let preset = ImportPresetSummary {
-        name: validated.manifest.preset.name.clone(),
-        description: validated.manifest.preset.description.clone(),
-        tags: validated.manifest.preset.tags.clone(),
-        category: validated.manifest.preset.category.clone(),
-        origin_id: validated.manifest.origin.id.clone(),
-        revision: validated.manifest.origin.revision,
+        name: validated.manifest.metadata.name.clone(),
+        description: validated.manifest.metadata.description.clone(),
+        tags: validated.manifest.metadata.tags.clone(),
+        category: validated.manifest.metadata.category.clone(),
+        origin_id: validated.manifest.origin_id.clone().unwrap_or_default(),
+        revision: validated.manifest.revision,
     };
     let assets = validated
+        .manifest
         .assets
         .iter()
         .map(|asset| ImportAssetSummary {
@@ -138,11 +139,15 @@ pub async fn commit_linglight_import_inner(
         .verify_unchanged()
         .map_err(anyhow::Error::new)?;
 
+    if !parameter_only && !pending.validated.unsupported_assets.is_empty() {
+        bail!("包中包含不支持的可选素材；必须明确选择仅导入参数");
+    }
+
     let mut warnings = pending.validated.warnings.clone();
-    if parameter_only && !pending.validated.assets.is_empty() {
+    if parameter_only && !pending.validated.manifest.lighting.asset_layers.is_empty() {
         warnings.push(format!(
             "已仅导入参数；移除了 {} 个素材层和全部资源引用",
-            pending.validated.assets.len()
+            pending.validated.manifest.lighting.asset_layers.len()
         ));
     }
     let assets_root = data_dir.join("game_data").join("lighting_assets");
@@ -187,13 +192,13 @@ fn detect_conflicts_from_sets(
     users: &[LightingPreset],
     builtins: &[LightingPreset],
 ) -> Vec<ImportConflict> {
-    let origin = &validated.manifest.origin.id;
-    let name = &validated.manifest.preset.name;
+    let origin = validated.manifest.origin_id.as_deref();
+    let name = &validated.manifest.metadata.name;
     let mut seen = HashSet::new();
     let mut conflicts = Vec::new();
     for preset in builtins {
-        if preset.id == *origin
-            || preset.origin_id.as_deref() == Some(origin)
+        if origin.is_some_and(|origin| preset.id == origin)
+            || (origin.is_some() && preset.origin_id.as_deref() == origin)
             || names_equal(&preset.name, name)
         {
             seen.insert(preset.id.clone());
@@ -205,7 +210,7 @@ fn detect_conflicts_from_sets(
         }
     }
     for preset in users {
-        if preset.origin_id.as_deref() == Some(origin) {
+        if origin.is_some() && preset.origin_id.as_deref() == origin {
             seen.insert(preset.id.clone());
             conflicts.push(ImportConflict {
                 kind: ImportConflictKind::SameOrigin,
@@ -233,16 +238,23 @@ fn build_imported_preset(
     let builtin_conflict = conflicts
         .iter()
         .any(|conflict| conflict.kind == ImportConflictKind::BuiltIn);
+    let origin = validated.manifest.origin_id.as_deref();
     let same_origin: Vec<_> = users
         .iter()
-        .filter(|preset| preset.origin_id.as_deref() == Some(validated.manifest.origin.id.as_str()))
+        .filter(|preset| origin.is_some() && preset.origin_id.as_deref() == origin)
         .collect();
-    if same_origin.len() > 1 {
+    if strategy == ImportStrategy::OverwriteSameOrigin && builtin_conflict {
+        bail!("内置光影预设不可被导入覆盖");
+    }
+    if strategy == ImportStrategy::OverwriteSameOrigin && same_origin.len() != 1 {
+        if same_origin.is_empty() {
+            bail!("未找到同源光影预设，不能覆盖；新建请使用 keep_both");
+        }
         bail!("存在多个同源光影预设，无法安全覆盖");
     }
 
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-    let snapshot = &validated.manifest.preset;
+    let snapshot = &validated.manifest.metadata;
     let (id, origin_id, name, created_at, favorite, last_used_at) = match strategy {
         ImportStrategy::KeepBoth => {
             let used_names = users
@@ -257,7 +269,11 @@ fn build_imported_preset(
             };
             let id = format!("user:{}", Uuid::new_v4());
             let origin_id = if conflicts.is_empty() {
-                validated.manifest.origin.id.clone()
+                validated
+                    .manifest
+                    .origin_id
+                    .clone()
+                    .unwrap_or_else(|| id.clone())
             } else {
                 // keep_both is a fork: give it a new portable identity so a
                 // later overwrite_same_origin never sees two matching users.
@@ -266,43 +282,27 @@ fn build_imported_preset(
             (id, origin_id, name, now.clone(), false, None)
         },
         ImportStrategy::OverwriteSameOrigin => {
-            if builtin_conflict {
-                bail!("内置光影预设不可被导入覆盖");
-            }
-            if let Some(existing) = same_origin.first() {
-                (
-                    existing.id.clone(),
-                    validated.manifest.origin.id.clone(),
-                    snapshot.name.clone(),
-                    existing.created_at.clone(),
-                    existing.favorite,
-                    existing.last_used_at.clone(),
-                )
-            } else {
-                if conflicts
-                    .iter()
-                    .any(|conflict| conflict.kind == ImportConflictKind::Name)
-                {
-                    bail!("同名光影预设来源不同，不能覆盖");
-                }
-                let id = format!("user:{}", Uuid::new_v4());
-                (
-                    id,
-                    validated.manifest.origin.id.clone(),
-                    snapshot.name.clone(),
-                    now.clone(),
-                    false,
-                    None,
-                )
-            }
+            let existing = same_origin[0];
+            (
+                existing.id.clone(),
+                validated
+                    .manifest
+                    .origin_id
+                    .clone()
+                    .expect("same-origin overwrite requires originId"),
+                snapshot.name.clone(),
+                existing.created_at.clone(),
+                existing.favorite,
+                existing.last_used_at.clone(),
+            )
         },
     };
-    let mut lighting = snapshot.lighting.clone();
+    let mut lighting = validated.manifest.lighting.clone();
     lighting.normalize();
     Ok(LightingPreset {
         id,
         origin_id: Some(origin_id),
-        revision: validated.manifest.origin.revision.max(1),
+        revision: validated.manifest.revision.max(1),
         kind: PresetKind::User,
         name,
         i18n_key: None,

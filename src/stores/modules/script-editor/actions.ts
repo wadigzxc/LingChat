@@ -98,12 +98,30 @@ export function restorePreviewRuntimeLighting(
   state: PreviewRuntimeLightingState,
   snapshot: ReturnType<typeof capturePreviewRuntimeLighting>
 ) {
+  // A newer revision may have arrived while the preview was stopping. Never attach the
+  // old snapshot values to that newer revision: Rust emits the authoritative restore
+  // payload after stopping, and the shared reducer will accept it only if it is newer.
+  if (state.lightingRevision > snapshot.lightingRevision) return;
   state.activeLighting = JSON.parse(JSON.stringify(snapshot.activeLighting)) as LightingParams;
   state.activeLightingSource = snapshot.activeLightingSource;
   state.activeLightingPresetId = snapshot.activeLightingPresetId;
   state.activeLightingPresetRevision = snapshot.activeLightingPresetRevision;
   state.activeLightingCustomized = snapshot.activeLightingCustomized;
-  state.lightingRevision = snapshot.lightingRevision;
+  state.lightingRevision = Math.max(state.lightingRevision, snapshot.lightingRevision);
+}
+
+/** Make preview replies stale before stopping Rust, then drain anything emitted during stop. */
+export async function stopPreviewInOrder(
+  markStopped: () => void,
+  stopBackend: () => Promise<void>,
+  clearLateEvents: () => void
+) {
+  markStopped();
+  try {
+    await stopBackend();
+  } finally {
+    clearLateEvents();
+  }
 }
 
 /** 试玩进出场会被引擎改写的 gameStore 字段（非响应式快照，还原原始引用）。 */
@@ -861,10 +879,15 @@ export const useEditorActions = (s: StateRefs, g: Getters) => {
 
   async function stopPreview() {
     if (!s.previewing.value) return;
-    s.previewing.value = false;
-    s.previewGeneration.value = null;
     try {
-      await api.stopPreview();
+      await stopPreviewInOrder(
+        () => {
+          s.previewing.value = false;
+          s.previewGeneration.value = null;
+        },
+        api.stopPreview,
+        () => eventQueue.clear()
+      );
     } catch (e) {
       console.warn("停止试玩失败:", e);
     }
@@ -873,7 +896,6 @@ export const useEditorActions = (s: StateRefs, g: Getters) => {
     // 后端试玩任务收尾——任务在 await 期间还会继续 emit 晚到的占位/旁白事件，
     // 它们入队（队列已暂停不处理），等下次进自由对话 resume 时被消费，就串到
     // 正常对话的首句（issue #2）。这里把晚到事件排空。
-    eventQueue.clear();
   }
 
   // ========================================================

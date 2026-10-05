@@ -11,6 +11,7 @@ use crate::ai_service::game_system::scene_store::{LightingParams, Scene, SceneSt
 use crate::ai_service::game_system::scene_transition::{
     SceneSelection, SceneStatePayload, StoredSceneSelection, resolve_startup_selection,
     restore_snapshot_scene, transition_scene_by_id, transition_scene_selection,
+    transition_scene_update,
 };
 use crate::ai_service::service::AIService;
 use crate::api::data_dir;
@@ -136,66 +137,61 @@ pub(crate) fn load_synchronized_scenes() -> Result<Vec<Scene>, String> {
 
 fn load_synchronized_scenes_from(data_dir: &Path, bg_dir: &Path) -> Result<Vec<Scene>, String> {
     let store = SceneStore::new(data_dir);
-    let mut scenes = store
-        .load_all()
-        .map_err(|e| format!("加载场景列表失败: {e}"))?;
-    let existing_bgs: HashSet<String> = scenes
-        .iter()
-        .map(|s| to_background_filename(&s.background))
-        .filter(|b| !b.is_empty())
-        .collect();
-    let allowed = ["png", "jpg", "jpeg", "webp", "bmp", "svg", "tif", "gif"];
-    let mut added = false;
+    store
+        .mutate_if_changed(|scenes| {
+            let mut existing_bgs: HashSet<String> = scenes
+                .iter()
+                .map(|s| to_background_filename(&s.background))
+                .filter(|b| !b.is_empty())
+                .collect();
+            let allowed = ["png", "jpg", "jpeg", "webp", "bmp", "svg", "tif", "gif"];
+            let mut added = false;
 
-    if let Ok(entries) = std::fs::read_dir(bg_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
+            if let Ok(entries) = std::fs::read_dir(bg_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_file() {
+                        continue;
+                    }
+                    let ext = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if !allowed.contains(&ext.as_str()) {
+                        continue;
+                    }
+                    let file_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    if !existing_bgs.insert(file_name.clone()) {
+                        continue;
+                    }
+                    let name = path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let now = now_iso();
+                    scenes.push(Scene {
+                        id: Uuid::new_v4().to_string(),
+                        name,
+                        description: String::new(),
+                        background: file_name,
+                        lighting: None,
+                        lighting_preset_id: None,
+                        lighting_preset_revision: None,
+                        lighting_customized: false,
+                        created_at: now.clone(),
+                        updated_at: now,
+                        plugin_id: None,
+                    });
+                    added = true;
+                }
             }
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            if !allowed.contains(&ext.as_str()) {
-                continue;
-            }
-            let file_name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if existing_bgs.contains(&file_name) {
-                continue;
-            }
-            let name = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let now = now_iso();
-            scenes.push(Scene {
-                id: Uuid::new_v4().to_string(),
-                name,
-                description: String::new(),
-                background: file_name,
-                lighting: None,
-                lighting_preset_id: None,
-                lighting_preset_revision: None,
-                lighting_customized: false,
-                created_at: now.clone(),
-                updated_at: now,
-                plugin_id: None,
-            });
-            added = true;
-        }
-    }
-
-    if added {
-        store
-            .save_all(&scenes)
-            .map_err(|e| format!("保存场景失败: {e}"))?;
-    }
-    Ok(scenes)
+            Ok((scenes.clone(), added))
+        })
+        .map_err(|e| format!("同步场景列表失败: {e}"))
 }
 
 fn persist_scene_selection(app: &AppHandle, scene_id: Option<&str>) -> Result<(), String> {
@@ -319,10 +315,6 @@ pub async fn list_scenes(_app: AppHandle) -> Result<Vec<SceneInfo>, String> {
 #[tauri::command]
 pub async fn create_scene(_app: AppHandle, req: CreateSceneRequest) -> Result<SceneInfo, String> {
     let store = SceneStore::new(&data_dir());
-    let mut scenes = store
-        .load_all()
-        .map_err(|e| format!("加载场景列表失败: {}", e))?;
-
     let now = now_iso();
     let scene = Scene {
         id: Uuid::new_v4().to_string(),
@@ -337,91 +329,97 @@ pub async fn create_scene(_app: AppHandle, req: CreateSceneRequest) -> Result<Sc
         updated_at: now,
         plugin_id: None,
     };
-    let info = model_to_info(&scene);
-    scenes.push(scene);
-    store
-        .save_all(&scenes)
-        .map_err(|e| format!("保存场景失败: {}", e))?;
-    Ok(info)
+    let saved = store
+        .mutate(|scenes| {
+            scenes.push(scene.clone());
+            Ok(scene)
+        })
+        .map_err(|e| format!("保存场景失败: {e}"))?;
+    Ok(model_to_info(&saved))
 }
 
 #[tauri::command]
-pub async fn update_scene(_app: AppHandle, req: UpdateSceneRequest) -> Result<SceneInfo, String> {
+pub async fn update_scene(app: AppHandle, req: UpdateSceneRequest) -> Result<SceneInfo, String> {
     let store = SceneStore::new(&data_dir());
-    let mut scenes = store
-        .load_all()
-        .map_err(|e| format!("加载场景列表失败: {}", e))?;
+    let scene_id = req.id.clone();
+    let (previous, updated) = store
+        .mutate(|scenes| {
+            let scene = scenes
+                .iter_mut()
+                .find(|scene| scene.id == req.id)
+                .ok_or_else(|| anyhow::anyhow!("场景 {} 不存在", req.id))?;
+            let previous = scene.clone();
+            scene.name = req.scene_name;
+            scene.description = req.scene_description;
+            scene.background = to_background_filename(&req.background);
+            scene.lighting = req.lighting;
+            scene.lighting_preset_id = req.lighting_preset_id;
+            scene.lighting_preset_revision = req.lighting_preset_revision;
+            scene.lighting_customized = req.lighting_customized;
+            scene.updated_at = now_iso();
+            Ok((previous, scene.clone()))
+        })
+        .map_err(|e| format!("更新场景失败: {e}"))?;
 
-    let idx = scenes
-        .iter()
-        .position(|s| s.id == req.id)
-        .ok_or_else(|| format!("场景 {} 不存在", req.id))?;
-
-    scenes[idx].name = req.scene_name;
-    scenes[idx].description = req.scene_description;
-    scenes[idx].background = to_background_filename(&req.background);
-    scenes[idx].lighting = req.lighting;
-    scenes[idx].lighting_preset_id = req.lighting_preset_id;
-    scenes[idx].lighting_preset_revision = req.lighting_preset_revision;
-    scenes[idx].lighting_customized = req.lighting_customized;
-    scenes[idx].updated_at = now_iso();
-
-    let info = model_to_info(&scenes[idx]);
-    store
-        .save_all(&scenes)
-        .map_err(|e| format!("保存场景失败: {}", e))?;
-    let state = _app.state::<AppState>();
+    let info = model_to_info(&updated);
+    let resolved_background = normalize_background(&updated.background);
+    let state = app.state::<AppState>();
     let service = state.ai_service.lock().await;
-    let is_current = service.game_status.lock().await.current_scene_id.as_deref() == Some(&req.id);
-    if is_current {
-        apply_scene_selection_for_service(&_app, &service, Some(&scenes[idx])).await?;
+    let mut game_status = service.game_status.lock().await;
+    let runtime = game_status.scene_runtime_state();
+    if runtime.current_scene_id.as_deref() == Some(scene_id.as_str()) {
+        let transition =
+            transition_scene_update(&runtime, &previous, updated, resolved_background)?;
+        let payload = SceneStatePayload::from(&transition);
+        game_status.apply_scene_transition(&transition);
+        drop(game_status);
+        emit_scene_state(&app, &payload)?;
     }
     Ok(info)
+}
+
+fn delete_scene_from_store(store: &SceneStore, id: &str, base: &Path) -> Result<(), String> {
+    store
+        .mutate_with_cleanup(
+            |scenes| {
+                let index = scenes
+                    .iter()
+                    .position(|scene| scene.id == id)
+                    .ok_or_else(|| anyhow::anyhow!("场景 {} 不存在", id))?;
+                Ok(scenes.remove(index))
+            },
+            |scenes, deleted| {
+                // Plugin backgrounds are owned by the plugin lifecycle.
+                let deleted_bg = to_background_filename(&deleted.background);
+                if deleted.plugin_id.is_some()
+                    || deleted_bg.is_empty()
+                    || scenes
+                        .iter()
+                        .any(|scene| to_background_filename(&scene.background) == deleted_bg)
+                {
+                    return Ok(());
+                }
+                // Check references and remove the file under the same shared lock.
+                // JSON has already committed: a save failure never reaches here.
+                let file_path = base.join(&deleted_bg);
+                if crate::utils::path::validate_path_in_base(&file_path, base).is_ok()
+                    && file_path.exists()
+                {
+                    if let Err(e) = std::fs::remove_file(&file_path) {
+                        tracing::warn!("删除场景背景图失败 {deleted_bg}: {e}");
+                    }
+                }
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| format!("删除场景失败: {e}"))
 }
 
 #[tauri::command]
 pub async fn delete_scene(app: AppHandle, id: String) -> Result<(), String> {
     let store = SceneStore::new(&data_dir());
-    let mut scenes = store
-        .load_all()
-        .map_err(|e| format!("加载场景列表失败: {}", e))?;
-
-    // 记住被删场景的背景图文件名，删除记录后据此清理孤儿文件。
-    // 插件场景随插件生命周期管理（且存绝对路径），不在此删除。
-    let deleted_bg = scenes
-        .iter()
-        .find(|s| s.id == id)
-        .filter(|s| s.plugin_id.is_none())
-        .map(|s| to_background_filename(&s.background))
-        .unwrap_or_default();
-
-    let before = scenes.len();
-    scenes.retain(|s| s.id != id);
-    if scenes.len() == before {
-        return Err(format!("场景 {} 不存在", id));
-    }
-
-    store
-        .save_all(&scenes)
-        .map_err(|e| format!("保存场景失败: {}", e))?;
-
-    // 若该背景图不再被任何剩余场景引用，删除文件，否则 list_scenes 会把它重新
-    // 注册成只有文件名、没有描述的占位场景（删除后“复活”的根因）。
-    if !deleted_bg.is_empty()
-        && !scenes
-            .iter()
-            .any(|s| to_background_filename(&s.background) == deleted_bg)
-    {
-        let base = super::backgrounds_dir();
-        let file_path = base.join(&deleted_bg);
-        if crate::utils::path::validate_path_in_base(&file_path, &base).is_ok()
-            && file_path.exists()
-        {
-            if let Err(e) = std::fs::remove_file(&file_path) {
-                tracing::warn!("删除场景背景图失败 {deleted_bg}: {e}");
-            }
-        }
-    }
+    delete_scene_from_store(&store, &id, &super::backgrounds_dir())?;
 
     // 若删除的是当前选中场景，统一清空背景、光影、持久化 ID 并广播。
     let state = app.state::<AppState>();
@@ -462,6 +460,62 @@ pub async fn set_scene_awareness(app: AppHandle, enabled: bool) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deleting_scene_preserves_shared_background_then_removes_orphan() {
+        let root = tempfile::tempdir().unwrap();
+        let bg_dir = root.path().join("backgrounds");
+        std::fs::create_dir_all(&bg_dir).unwrap();
+        let bg = bg_dir.join("sky.png");
+        std::fs::write(&bg, b"png fixture").unwrap();
+        let store = SceneStore::new(root.path());
+        let first = load_synchronized_scenes_from(root.path(), &bg_dir)
+            .unwrap()
+            .remove(0);
+        let mut second = first.clone();
+        second.id = "second".into();
+        // Legacy full paths must count as references to the same filename.
+        second.background = bg.to_string_lossy().into_owned();
+        store
+            .mutate(|scenes| {
+                scenes.push(second);
+                Ok(())
+            })
+            .unwrap();
+        delete_scene_from_store(&store, &first.id, &bg_dir).unwrap();
+        assert!(bg.exists());
+        assert_eq!(store.load_all().unwrap().len(), 1);
+        delete_scene_from_store(&store, "second", &bg_dir).unwrap();
+        assert!(!bg.exists());
+        assert!(
+            load_synchronized_scenes_from(root.path(), &bg_dir)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn deleting_plugin_scene_never_removes_plugin_background() {
+        let root = tempfile::tempdir().unwrap();
+        let bg_dir = root.path().join("backgrounds");
+        std::fs::create_dir_all(&bg_dir).unwrap();
+        let bg = bg_dir.join("plugin.png");
+        std::fs::write(&bg, b"plugin").unwrap();
+        let store = SceneStore::new(root.path());
+        let mut scene = load_synchronized_scenes_from(root.path(), &bg_dir)
+            .unwrap()
+            .remove(0);
+        scene.plugin_id = Some("plugin".into());
+        let id = scene.id.clone();
+        store
+            .mutate(|scenes| {
+                *scenes = vec![scene];
+                Ok(())
+            })
+            .unwrap();
+        delete_scene_from_store(&store, &id, &bg_dir).unwrap();
+        assert!(bg.exists());
+    }
 
     #[test]
     fn ui_and_ai_scene_lists_share_background_directory_synchronization() {

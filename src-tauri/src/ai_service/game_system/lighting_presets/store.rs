@@ -91,7 +91,29 @@ impl LightingPresetStore {
     }
 
     pub async fn lighting_for_application(&self, id: &str) -> Result<Option<LightingParams>> {
-        Ok(self.get(id).await?.map(|preset| preset.lighting))
+        Ok(self
+            .take_for_application(id)
+            .await?
+            .map(|preset| preset.lighting))
+    }
+
+    /// Returns an owned preset snapshot for application and records successful
+    /// retrieval as recent use in the same serialized read-modify-write cycle.
+    /// Generated built-ins remain immutable.
+    pub async fn take_for_application(&self, id: &str) -> Result<Option<LightingPreset>> {
+        let _guard = self.mutation_lock.lock().await;
+        if let Some(preset) = builtin_presets().into_iter().find(|preset| preset.id == id) {
+            return Ok(Some(preset));
+        }
+
+        let mut users = self.load_users()?;
+        let Some(preset) = users.iter_mut().find(|preset| preset.id == id) else {
+            return Ok(None);
+        };
+        preset.last_used_at = Some(now());
+        let result = preset.clone();
+        self.save_users(&users)?;
+        Ok(Some(result))
     }
 
     pub async fn list(&self, sort: PresetSort) -> Result<Vec<LightingPreset>> {

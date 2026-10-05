@@ -262,6 +262,17 @@ impl GameStatus {
         self.lighting_revision = transition.lighting_revision;
     }
 
+    pub fn apply_scene_runtime_state(&mut self, runtime: &SceneRuntimeState) {
+        self.current_scene_id = runtime.current_scene_id.clone();
+        self.background = runtime.background.clone();
+        self.active_lighting = runtime.active_lighting.clone();
+        self.active_lighting_source = runtime.source;
+        self.active_lighting_preset_id = runtime.preset_id.clone();
+        self.active_lighting_preset_revision = runtime.preset_revision;
+        self.active_lighting_customized = runtime.customized;
+        self.lighting_revision = runtime.lighting_revision;
+    }
+
     // ============ 存档状态快照 ============
 
     /// 将当前 GameStatus 中需要持久化的字段导出为可序列化的快照

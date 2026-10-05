@@ -10,7 +10,7 @@ use zip::write::SimpleFileOptions;
 
 use super::{
     ArchiveLimits, LINGLIGHT_FORMAT, LINGLIGHT_VERSION, LingLightManifest, ManifestAsset,
-    OriginMetadata, PresetSnapshot, validate_linglight,
+    PresetSnapshot, validate_linglight,
 };
 use crate::ai_service::game_system::lighting_presets::{
     LightingPreset, LightingPresetStore, PresetKind,
@@ -159,28 +159,26 @@ fn write_package(
     let manifest = LingLightManifest {
         format: LINGLIGHT_FORMAT.to_string(),
         version: LINGLIGHT_VERSION,
-        required_capabilities: Vec::new(),
-        optional_capabilities: Vec::new(),
-        preset: PresetSnapshot {
+        origin_id: Some(
+            preset
+                .origin_id
+                .clone()
+                .unwrap_or_else(|| preset.id.clone()),
+        ),
+        revision: preset.revision,
+        metadata: PresetSnapshot {
             name: preset.name.clone(),
             description: preset.description.clone(),
             aliases: preset.aliases.clone(),
             tags: preset.tags.clone(),
             category: preset.category.clone(),
-            lighting: preset.lighting.clone(),
         },
-        origin: OriginMetadata {
-            id: preset
-                .origin_id
-                .clone()
-                .unwrap_or_else(|| preset.id.clone()),
-            revision: preset.revision,
-            created_by: None,
-        },
+        lighting: preset.lighting.clone(),
         assets: prepared_assets
             .iter()
             .map(|asset| asset.manifest.clone())
             .collect(),
+        future_layers: Vec::new(),
     };
     let mut zip = ZipWriter::new(output);
     zip.start_file("manifest.json", SimpleFileOptions::default())?;
@@ -249,15 +247,10 @@ fn prepare_assets(preset: &LightingPreset, data_dir: &Path) -> Result<Vec<Prepar
                 id: layer.id.clone(),
                 path,
                 sha256: actual_hash,
+                media_type: layer.media_type.clone(),
                 byte_size: bytes.len() as u64,
                 width,
                 height,
-                target: layer.target,
-                placement: layer.placement,
-                z_index: layer.z_index,
-                opacity: layer.opacity,
-                blend_mode: layer.blend_mode,
-                fit: layer.fit,
                 required: layer.required,
             },
             bytes,

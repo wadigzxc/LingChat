@@ -1,15 +1,47 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::scene_store::{LightingParams, Scene};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SceneLightingSource {
     Neutral,
     SceneDefault,
     ManualPreset,
     ManualCustom,
     AiPreset,
+}
+
+impl Serialize for SceneLightingSource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(match self {
+            Self::Neutral => "neutral",
+            Self::SceneDefault => "scene_default",
+            Self::ManualPreset | Self::ManualCustom => "manual",
+            Self::AiPreset => "ai",
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for SceneLightingSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "neutral" => Ok(Self::Neutral),
+            "scene_default" => Ok(Self::SceneDefault),
+            "manual" => Ok(Self::ManualCustom),
+            "ai" => Ok(Self::AiPreset),
+            _ => Err(serde::de::Error::unknown_variant(
+                &value,
+                &["neutral", "scene_default", "manual", "ai"],
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -180,6 +212,53 @@ pub fn transition_scene_selection(
     }
 }
 
+pub fn transition_scene_update(
+    current: &SceneRuntimeState,
+    previous: &Scene,
+    updated: Scene,
+    resolved_background: String,
+) -> Result<SceneTransition, String> {
+    let snapshot_changed = previous.background != updated.background
+        || previous.lighting != updated.lighting
+        || previous.lighting_preset_id != updated.lighting_preset_id
+        || previous.lighting_preset_revision != updated.lighting_preset_revision
+        || previous.lighting_customized != updated.lighting_customized;
+    if snapshot_changed {
+        return transition_scene_selection(
+            current,
+            Some(SceneSelection::new(updated, resolved_background)),
+        );
+    }
+
+    let lighting_revision = current
+        .lighting_revision
+        .checked_add(1)
+        .ok_or_else(|| "场景光影 revision 已达到上限".to_string())?;
+    Ok(SceneTransition {
+        scene: Some(updated),
+        current_scene_id: current.current_scene_id.clone(),
+        background: resolved_background,
+        active_lighting: current.active_lighting.clone(),
+        source: current.source,
+        preset_id: current.preset_id.clone(),
+        preset_revision: current.preset_revision,
+        customized: current.customized,
+        lighting_revision,
+    })
+}
+
+pub fn preserve_temporary_lighting_after_session_reset(
+    before: &SceneRuntimeState,
+    reset: SceneRuntimeState,
+) -> SceneRuntimeState {
+    match before.source {
+        SceneLightingSource::ManualPreset
+        | SceneLightingSource::ManualCustom
+        | SceneLightingSource::AiPreset => before.clone(),
+        SceneLightingSource::Neutral | SceneLightingSource::SceneDefault => reset,
+    }
+}
+
 pub fn transition_scene_by_id<F>(
     current: &SceneRuntimeState,
     scenes: &[Scene],
@@ -236,6 +315,122 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".into(),
             plugin_id: None,
         }
+    }
+
+    #[test]
+    fn current_scene_metadata_update_preserves_temporary_lighting() {
+        let mut temporary = LightingParams::default();
+        temporary.master_intensity = 0.25;
+        let current = SceneRuntimeState {
+            current_scene_id: Some("scene-1".into()),
+            background: "C:/backgrounds/stored.png".into(),
+            active_lighting: temporary.clone(),
+            source: SceneLightingSource::ManualCustom,
+            preset_id: Some("user:temporary".into()),
+            preset_revision: Some(9),
+            customized: true,
+            lighting_revision: 20,
+        };
+        let previous = scene("scene-1", "stored.png", Some(LightingParams::default()));
+        let mut updated = previous.clone();
+        updated.name = "Renamed".into();
+        updated.description = "New description".into();
+
+        let transition = transition_scene_update(
+            &current,
+            &previous,
+            updated.clone(),
+            "C:/backgrounds/stored.png".into(),
+        )
+        .unwrap();
+
+        assert_eq!(transition.scene.unwrap().name, "Renamed");
+        assert_eq!(transition.background, "C:/backgrounds/stored.png");
+        assert_eq!(transition.active_lighting, temporary);
+        assert_eq!(transition.source, SceneLightingSource::ManualCustom);
+        assert_eq!(transition.preset_id.as_deref(), Some("user:temporary"));
+        assert_eq!(transition.preset_revision, Some(9));
+        assert!(transition.customized);
+        assert_eq!(transition.lighting_revision, 21);
+    }
+
+    #[test]
+    fn current_scene_snapshot_update_restores_scene_default() {
+        let mut temporary = LightingParams::default();
+        temporary.master_intensity = 0.25;
+        let current = SceneRuntimeState {
+            current_scene_id: Some("scene-1".into()),
+            background: "C:/backgrounds/stored.png".into(),
+            active_lighting: temporary,
+            source: SceneLightingSource::AiPreset,
+            preset_id: Some("user:temporary".into()),
+            preset_revision: Some(9),
+            customized: false,
+            lighting_revision: 20,
+        };
+        let previous = scene("scene-1", "stored.png", Some(LightingParams::default()));
+        let mut updated = previous.clone();
+        updated.lighting.as_mut().unwrap().master_intensity = 1.4;
+        updated.lighting_preset_id = Some("user:saved".into());
+        updated.lighting_preset_revision = Some(10);
+
+        let transition = transition_scene_update(
+            &current,
+            &previous,
+            updated,
+            "C:/backgrounds/stored.png".into(),
+        )
+        .unwrap();
+
+        assert_eq!(transition.active_lighting.master_intensity, 1.4);
+        assert_eq!(transition.source, SceneLightingSource::SceneDefault);
+        assert_eq!(transition.preset_id.as_deref(), Some("user:saved"));
+        assert_eq!(transition.preset_revision, Some(10));
+        assert_eq!(transition.lighting_revision, 21);
+    }
+
+    #[test]
+    fn public_source_wire_collapses_internal_manual_and_ai_kinds() {
+        assert_eq!(
+            serde_json::to_value(SceneLightingSource::ManualPreset).unwrap(),
+            "manual"
+        );
+        assert_eq!(
+            serde_json::to_value(SceneLightingSource::ManualCustom).unwrap(),
+            "manual"
+        );
+        assert_eq!(
+            serde_json::to_value(SceneLightingSource::AiPreset).unwrap(),
+            "ai"
+        );
+        assert_eq!(
+            serde_json::from_str::<SceneLightingSource>(r#""manual""#).unwrap(),
+            SceneLightingSource::ManualCustom
+        );
+        for internal in ["manual_preset", "manual_custom", "ai_preset"] {
+            assert!(
+                serde_json::from_str::<SceneLightingSource>(&format!(r#""{internal}""#)).is_err(),
+                "internal source leaked onto the public wire: {internal}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_reset_preserves_temporary_manual_lighting() {
+        let mut before = SceneRuntimeState::neutral(12);
+        before.current_scene_id = Some("scene-1".into());
+        before.background = "background.png".into();
+        before.active_lighting.master_intensity = 0.25;
+        before.source = SceneLightingSource::ManualCustom;
+        before.preset_id = Some("user:base".into());
+        before.preset_revision = Some(4);
+        before.customized = true;
+        let mut reset = SceneRuntimeState::neutral(0);
+        reset.current_scene_id = Some("scene-1".into());
+
+        let preserved = preserve_temporary_lighting_after_session_reset(&before, reset);
+
+        assert_eq!(preserved, before);
     }
 
     #[test]

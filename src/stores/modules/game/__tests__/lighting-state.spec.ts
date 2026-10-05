@@ -19,7 +19,7 @@ describe("game runtime lighting state", () => {
     const ui = useUIStore();
     game.currentScene = scene();
     game.activeLighting = lighting(1.5);
-    game.activeLightingSource = "manual_custom";
+    game.activeLightingSource = "manual";
     ui.setCurrentBackground("old.png");
 
     game.applyCurrentScene(null);
@@ -64,7 +64,7 @@ describe("game runtime lighting state", () => {
       current_scene_id: "scene-1",
       current_scene: scene(),
       active_lighting: lighting(1.75),
-      active_lighting_source: "manual_preset",
+      active_lighting_source: "manual",
       active_lighting_preset_id: "user:night",
       active_lighting_preset_revision: 4,
       active_lighting_customized: true,
@@ -76,7 +76,7 @@ describe("game runtime lighting state", () => {
     applyWebInitData(game, info);
 
     expect(game.activeLighting.master_intensity).toBe(1.75);
-    expect(game.activeLightingSource).toBe("manual_preset");
+    expect(game.activeLightingSource).toBe("manual");
     expect(game.activeLightingPresetId).toBe("user:night");
     expect(game.activeLightingPresetRevision).toBe(4);
     expect(game.activeLightingCustomized).toBe(true);
@@ -88,7 +88,7 @@ describe("game runtime lighting state", () => {
       "lingchat-game",
       JSON.stringify({
         activeLighting: lighting(2),
-        activeLightingSource: "manual_custom",
+        activeLightingSource: "manual",
         activeLightingPresetId: "stale",
         lightingRevision: 99,
       })
@@ -103,7 +103,7 @@ describe("game runtime lighting state", () => {
 
     localStorage.clear();
     game.activeLighting = lighting(1.5);
-    game.activeLightingSource = "manual_custom";
+    game.activeLightingSource = "manual";
     game.activeLightingPresetId = "temporary";
     game.lightingRevision = 99;
 

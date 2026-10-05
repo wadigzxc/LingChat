@@ -334,6 +334,33 @@ pub async fn init_game(app: AppHandle) -> Result<WebInitData, String> {
     build_web_init_data(&service, &app).await
 }
 
+#[cfg(test)]
+mod reset_lock_tests {
+    // AppHandle + database setup is not needed for this lock-scope regression:
+    // guard the actual command bodies, not a parallel model of their locking.
+    #[test]
+    fn reset_commands_keep_snapshot_reset_restore_in_one_service_lock_scope() {
+        let source = include_str!("game.rs");
+        for name in ["select_character", "clear_conversation"] {
+            let body = source
+                .split(&format!("pub async fn {name}("))
+                .nth(1)
+                .unwrap()
+                .split("game_status.apply_scene_runtime_state(&preserved);")
+                .next()
+                .unwrap();
+            assert_eq!(
+                body.matches("state.ai_service.lock().await").count(),
+                1,
+                "{name}: snapshot and reset must not reacquire the outer lock"
+            );
+            let snapshot = body.find("let runtime_before_reset").unwrap();
+            assert!(body[..snapshot].contains("let mut service = state.ai_service.lock().await;"));
+            assert!(!body[snapshot..].contains("drop(service)"));
+        }
+    }
+}
+
 // ========== 角色切换 ==========
 
 #[tauri::command]
@@ -348,13 +375,21 @@ pub async fn select_character(app: AppHandle, character_id: i32) -> Result<WebIn
         no_emotion_limit: app_config.no_emotion_limit_prompt,
     };
 
-    // 3. 更新 AIService 状态
+    // 3. Snapshot → reset → restore must share the outer service lock.
     {
         let mut service = state.ai_service.lock().await;
+        let runtime_before_reset = service.game_status.lock().await.scene_runtime_state();
         service
             .init_game_status(Some(character_id), prompt_options)
             .await
             .map_err(|e| format!("初始化游戏状态失败: {}", e))?;
+        let mut game_status = service.game_status.lock().await;
+        let reset = game_status.scene_runtime_state();
+        let preserved = crate::ai_service::game_system::scene_transition::preserve_temporary_lighting_after_session_reset(
+            &runtime_before_reset,
+            reset,
+        );
+        game_status.apply_scene_runtime_state(&preserved);
     }
 
     // 4. 持久化上次游玩的角色 ID
@@ -372,7 +407,6 @@ pub async fn select_character(app: AppHandle, character_id: i32) -> Result<WebIn
     //    drop 后再拿锁，避免同一个锁两次借用
     let init = {
         let service = state.ai_service.lock().await;
-        super::scene::restore_startup_scene_selection(&app, &service).await?;
         build_web_init_data(&service, &app).await?
     };
     Ok(init)
@@ -392,15 +426,22 @@ pub async fn clear_conversation(app: AppHandle) -> Result<WebInitData, String> {
 
     {
         let mut service = state.ai_service.lock().await;
+        let runtime_before_reset = service.game_status.lock().await.scene_runtime_state();
         service
             .reset_game_status()
             .await
             .map_err(|e| format!("重置对话失败: {}", e))?;
+        let mut game_status = service.game_status.lock().await;
+        let reset = game_status.scene_runtime_state();
+        let preserved = crate::ai_service::game_system::scene_transition::preserve_temporary_lighting_after_session_reset(
+            &runtime_before_reset,
+            reset,
+        );
+        game_status.apply_scene_runtime_state(&preserved);
     }
 
     let init = {
         let service = state.ai_service.lock().await;
-        super::scene::restore_startup_scene_selection(&app, &service).await?;
         build_web_init_data(&service, &app).await?
     };
     Ok(init)

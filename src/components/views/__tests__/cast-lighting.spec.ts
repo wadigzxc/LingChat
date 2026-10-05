@@ -8,7 +8,7 @@ function castMirror(revision: number, intensity: number) {
     currentSceneId: "scene-1",
     background: "resolved.png",
     activeLighting: lighting(intensity),
-    activeLightingSource: "manual_custom" as const,
+    activeLightingSource: "manual" as const,
     activeLightingPresetId: "user:cast",
     activeLightingPresetRevision: 3,
     activeLightingCustomized: true,

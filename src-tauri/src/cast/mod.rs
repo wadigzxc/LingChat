@@ -498,7 +498,7 @@ mod tests {
 
         let enriched = enrich_mirror_with_runtime_lighting(mirror, &runtime).unwrap();
 
-        assert_eq!(enriched["activeLightingSource"], "manual_preset");
+        assert_eq!(enriched["activeLightingSource"], "manual");
         assert_eq!(enriched["activeLightingPresetId"], "user:current");
         assert_eq!(enriched["activeLightingPresetRevision"], 2);
         assert_eq!(enriched["lightingRevision"], 17);

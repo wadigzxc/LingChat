@@ -48,6 +48,48 @@ async fn list_sorts_most_recently_used_first_and_never_used_last() {
 }
 
 #[tokio::test]
+async fn taking_user_preset_for_application_marks_it_used_in_the_same_transaction() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = LightingPresetStore::new(temp.path());
+    let first = store.create(draft("A first")).await.unwrap();
+    let second = store.create(draft("B second")).await.unwrap();
+
+    let applied = store
+        .take_for_application(&first.id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let users: Vec<_> = store
+        .list(PresetSort::RecentlyUsed)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|preset| preset.kind == PresetKind::User)
+        .collect();
+    assert_eq!(users[0].id, first.id);
+    assert_eq!(users[0].last_used_at, applied.last_used_at);
+    assert!(applied.last_used_at.is_some());
+    assert_eq!(users[1].id, second.id);
+    assert!(users[1].last_used_at.is_none());
+}
+
+#[tokio::test]
+async fn taking_builtin_for_application_does_not_mutate_generated_builtin() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = LightingPresetStore::new(temp.path());
+
+    let applied = store
+        .take_for_application("builtin:neutral")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(applied.last_used_at.is_none());
+    assert!(!temp.path().join("game_data/lighting_presets.json").exists());
+}
+
+#[tokio::test]
 async fn list_sorts_favorites_first_with_stable_name_ties() {
     let temp = tempfile::tempdir().unwrap();
     let store = LightingPresetStore::new(temp.path());
@@ -91,6 +133,24 @@ async fn list_sorts_by_name_with_stable_id_tie_break() {
     assert_eq!(users[1].id, tied_ids[0]);
     assert_eq!(users[2].id, tied_ids[1]);
     assert_eq!(users[3].name, "Zebra");
+}
+
+#[tokio::test]
+async fn application_params_also_use_atomic_recent_use_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = LightingPresetStore::new(temp.path());
+    let created = store.create(draft("Application source")).await.unwrap();
+    let lighting = store
+        .lighting_for_application(&created.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let saved = store.get(&created.id).await.unwrap().unwrap();
+    assert!(
+        saved.last_used_at.is_some(),
+        "legacy application accessor must not bypass recent-use transaction"
+    );
+    assert_eq!(lighting, saved.lighting);
 }
 
 #[tokio::test]
