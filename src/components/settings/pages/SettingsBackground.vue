@@ -55,6 +55,27 @@
         </div>
       </div>
 
+      <LightingPresetSelect
+        :refresh-key="lightingPresetVersion"
+        :active-preset-id="gameStore.activeLightingPresetId"
+      />
+      <button
+        data-manage-lighting
+        class="my-3 rounded-lg border border-white/20 px-4 py-2 text-white"
+        @click="showLightingManager = !showLightingManager"
+      >
+        {{
+          showLightingManager
+            ? lightingText("closeManager", "关闭预设管理器")
+            : lightingText("manage", "管理光影预设")
+        }}
+      </button>
+      <LightingPresetManager
+        v-if="showLightingManager"
+        :active-lighting="gameStore.activeLighting"
+        @changed="lightingPresetVersion++"
+      />
+
       <!-- 场景卡片网格 -->
       <div class="grid w-full grid-cols-1 gap-5 pb-5 sm:grid-cols-2 xl:grid-cols-3">
         <div
@@ -549,6 +570,12 @@
     Cpu,
     RefreshCw,
   } from "lucide-vue-next";
+  import { useLightingOperation } from "../lighting/useLightingOperation";
+  const { text: lightingText } = useLightingOperation();
+  import LightingPresetSelect from "../lighting/LightingPresetSelect.vue";
+  import LightingPresetManager from "../lighting/LightingPresetManager.vue";
+  const showLightingManager = ref(false);
+  const lightingPresetVersion = ref(0);
   import SceneEditModal from "../scene/SceneEditModal.vue";
   import DialogAppearancePanel from "../dialog/DialogAppearancePanel.vue";
   import PluginTag from "@/components/ui/PluginTag.vue";
