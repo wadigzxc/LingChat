@@ -20,28 +20,84 @@ permissions:
 
 jobs:
   quality:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CARGO_BUILD_JOBS: "1"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "1"
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
       - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
         with:
           version: 11.21.0
           run_install: false
-
       - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
         with:
           node-version: 26
           cache: pnpm
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: 1.97.1
+          components: clippy
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          save-if: ${{ github.ref == 'refs/heads/dev' }}
+      - name: 安装 Linux 依赖 (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y eatmydata
+          sudo eatmydata apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            libgbm-dev \
+            libegl1-mesa-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxrandr-dev \
+            libxcomposite-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxtst-dev \
+            libwayland-dev \
+            libdbus-1-dev \
+            mold
 
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
-
       - name: 前端测试
         run: pnpm test
-
+      - name: 前端类型检查
+        run: pnpm typecheck
       - name: 前端构建
         run: pnpm build
+      - name: 准备桌面测试资源（不改用户 data）
+        run: |
+          mkdir -p data/.official/game_data data/third_party
+          node scripts/prepare-desktop-resources.mjs --staging-only
+      - name: Rust 全量测试（包含 archive 路径安全与示例往返）
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      - name: Clippy 诊断（既存债务保留，新增告警阻断）
+        run: node scripts/ci/check-clippy.mjs
 
   build:
     needs: quality

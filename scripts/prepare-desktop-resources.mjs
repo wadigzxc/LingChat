@@ -43,6 +43,9 @@ if (existsSync(stagingDir)) {
   }
 }
 mkdirSync(stagingDir, { recursive: true });
+// Tauri 校验目录资源即使没有文件也必须存在。
+mkdirSync(join(stagingDir, "game_data"), { recursive: true });
+mkdirSync(join(stagingDir, "third_party"), { recursive: true });
 
 // 移动端（android/ios）：默认资源全部走 data.7z（见 prepare-bundled-resources.mjs），
 // 桌面端 .official 资源不进入移动端包体。但仍需生成空占位目录与空 manifest，
@@ -196,8 +199,11 @@ console.log(
 );
 
 // 同时写入项目根目录（供 generate-data-manifest 兼容）
-const projectManifestPath = join(projectRoot, "data", "data_manifest.json");
-writeFileSync(projectManifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+// 测试/CI 只写 staging，不覆盖用户 data 中已有的 manifest。
+if (!process.argv.includes("--staging-only")) {
+  const projectManifestPath = join(projectRoot, "data", "data_manifest.json");
+  writeFileSync(projectManifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+}
 
 const totalSize = Object.values(manifest.files).reduce((sum, f) => sum + f.size, 0);
 const sizeMB = (totalSize / (1024 * 1024)).toFixed(1);

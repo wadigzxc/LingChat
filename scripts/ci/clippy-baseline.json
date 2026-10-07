@@ -1,0 +1,959 @@
+{
+  "sourceCommit": "5a1fa0d9e4aadbe69acdfb54c3706d6cd3ee8c35",
+  "toolchain": "1.97.1",
+  "platform": "Windows; Linux unknown diagnostics fail closed",
+  "warnings": [
+    {
+      "file": "src/achievements/manager.rs",
+      "line": 149,
+      "code": "clippy::unnecessary_lazy_evaluations",
+      "message": "unnecessary closure used to substitute value for `Option::None`",
+      "count": 2
+    },
+    {
+      "file": "src/achievements/manager.rs",
+      "line": 163,
+      "code": "clippy::unnecessary_lazy_evaluations",
+      "message": "unnecessary closure used to substitute value for `Option::None`",
+      "count": 2
+    },
+    {
+      "file": "src/achievements/manager.rs",
+      "line": 190,
+      "code": "clippy::map_entry",
+      "message": "usage of `contains_key` followed by `insert` on a `HashMap`",
+      "count": 2
+    },
+    {
+      "file": "src/achievements/triggers.rs",
+      "line": 63,
+      "code": "clippy::manual_range_contains",
+      "message": "manual `!Range::contains` implementation",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/asr/provider_stream_llama.rs",
+      "line": 95,
+      "code": "clippy::type_complexity",
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/emotion/classifier.rs",
+      "line": 261,
+      "code": "clippy::redundant_closure",
+      "message": "redundant closure",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/emotion/classifier.rs",
+      "line": 287,
+      "code": "clippy::manual_repeat_n",
+      "message": "this `repeat().take()` can be written more concisely",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/emotion/classifier.rs",
+      "line": 288,
+      "code": "clippy::manual_repeat_n",
+      "message": "this `repeat().take()` can be written more concisely",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/emotion/classifier.rs",
+      "line": 317,
+      "code": "clippy::redundant_closure",
+      "message": "redundant closure",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting/migrate.rs",
+      "line": 24,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting/model.rs",
+      "line": 43,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting/model.rs",
+      "line": 58,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting/model.rs",
+      "line": 76,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting/model.rs",
+      "line": 90,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting/model.rs",
+      "line": 105,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting/tests.rs",
+      "line": 91,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/lighting/tests.rs",
+      "line": 183,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/lighting_presets/builtins.rs",
+      "line": 84,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting_presets/builtins.rs",
+      "line": 99,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting_presets/builtins.rs",
+      "line": 114,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting_presets/builtins.rs",
+      "line": 129,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting_presets/mod.rs",
+      "line": 5,
+      "code": "unused_imports",
+      "message": "unused import: `builtins::builtin_presets`",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/lighting_presets/model.rs",
+      "line": 20,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting_presets/model.rs",
+      "line": 26,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/lighting_presets/store.rs",
+      "line": 93,
+      "code": "dead_code",
+      "message": "method `lighting_for_application` is never used",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/memory_builder.rs",
+      "line": 396,
+      "code": "dead_code",
+      "message": "function `assistant_with_calls` is never used",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/memory_builder.rs",
+      "line": 417,
+      "code": "dead_code",
+      "message": "function `tool_msg` is never used",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/persistent_memory_system.rs",
+      "line": 217,
+      "code": "clippy::too_many_arguments",
+      "message": "this function has too many arguments (8/7)",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/persistent_memory_system.rs",
+      "line": 262,
+      "code": "dead_code",
+      "message": "method `history_revision_for_test` is never used",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/role_manager.rs",
+      "line": 52,
+      "code": "clippy::too_many_arguments",
+      "message": "this function has too many arguments (10/7)",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/role_manager.rs",
+      "line": 382,
+      "code": "clippy::too_many_arguments",
+      "message": "this function has too many arguments (8/7)",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/scene_transition.rs",
+      "line": 347,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/scene_transition.rs",
+      "line": 484,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/scene_transition.rs",
+      "line": 521,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/scene_transition.rs",
+      "line": 601,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/scene_transition.rs",
+      "line": 665,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/scene_transition.rs",
+      "line": 738,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/scene_transition.rs",
+      "line": 750,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/events/ai_dialogue_event.rs",
+      "line": 54,
+      "code": "clippy::explicit_auto_deref",
+      "message": "deref which would be done by auto-deref",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/events/chapter_end_event.rs",
+      "line": 107,
+      "code": "clippy::clone_on_copy",
+      "message": "using `clone` on type `Option<&Arc<LlmClient>>` which implements the `Copy` trait",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/events/chapter_end_event.rs",
+      "line": 112,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/events/choice_event.rs",
+      "line": 123,
+      "code": "clippy::explicit_auto_deref",
+      "message": "deref which would be done by auto-deref",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/events/dialog_event.rs",
+      "line": 130,
+      "code": "clippy::explicit_auto_deref",
+      "message": "deref which would be done by auto-deref",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/events/free_dialogue_event.rs",
+      "line": 96,
+      "code": "clippy::explicit_auto_deref",
+      "message": "deref which would be done by auto-deref",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/events/modify_character_event.rs",
+      "line": 102,
+      "code": "clippy::explicit_auto_deref",
+      "message": "deref which would be done by auto-deref",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/events/set_variable_event.rs",
+      "line": 47,
+      "code": "clippy::collapsible_if",
+      "message": "this `if` statement can be collapsed",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/events/set_variable_event.rs",
+      "line": 70,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/script_manager.rs",
+      "line": 181,
+      "code": "clippy::doc_lazy_continuation",
+      "message": "doc list item without indentation",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/utils/media.rs",
+      "line": 105,
+      "code": "clippy::needless_lifetimes",
+      "message": "the following explicit lifetimes could be elided: 'a",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/utils/media.rs",
+      "line": 106,
+      "code": "clippy::manual_pattern_char_comparison",
+      "message": "this manual char comparison can be written more succinctly",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/game_system/script_engine/utils/media.rs",
+      "line": 109,
+      "code": "clippy::manual_pattern_char_comparison",
+      "message": "this manual char comparison can be written more succinctly",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/message_system/events.rs",
+      "line": 12,
+      "code": "clippy::empty_line_after_doc_comments",
+      "message": "empty line after doc comment",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/message_system/processor.rs",
+      "line": 155,
+      "code": "clippy::regex_creation_in_loops",
+      "message": "compiling a regex in a loop",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/message_system/processor.rs",
+      "line": 210,
+      "code": "clippy::collapsible_str_replace",
+      "message": "used consecutive `str::replace` call",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/message_system/processor.rs",
+      "line": 352,
+      "code": "clippy::collapsible_str_replace",
+      "message": "used consecutive `str::replace` call",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/message_system/producer.rs",
+      "line": 144,
+      "code": "clippy::chars_next_cmp",
+      "message": "you should use the `starts_with` method",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/proactive_system/mod.rs",
+      "line": 99,
+      "code": "clippy::let_and_return",
+      "message": "returning the result of a `let` binding from a block",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/proactive_system/strategy_dispatcher.rs",
+      "line": 250,
+      "code": "clippy::unwrap_or_default",
+      "message": "use of `unwrap_or` to construct default value",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/proactive_system/types.rs",
+      "line": 7,
+      "code": "clippy::upper_case_acronyms",
+      "message": "name `IDLE` contains a capitalized acronym",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/proactive_system/types.rs",
+      "line": 8,
+      "code": "clippy::upper_case_acronyms",
+      "message": "name `BROWSING` contains a capitalized acronym",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/proactive_system/types.rs",
+      "line": 9,
+      "code": "clippy::upper_case_acronyms",
+      "message": "name `WORK` contains a capitalized acronym",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/proactive_system/types.rs",
+      "line": 10,
+      "code": "clippy::upper_case_acronyms",
+      "message": "name `GAME` contains a capitalized acronym",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/proactive_system/types.rs",
+      "line": 11,
+      "code": "clippy::upper_case_acronyms",
+      "message": "name `CASUAL` contains a capitalized acronym",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/service.rs",
+      "line": 36,
+      "code": "clippy::too_many_arguments",
+      "message": "this function has too many arguments (10/7)",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/skill_agent/core.rs",
+      "line": 171,
+      "code": "clippy::needless_range_loop",
+      "message": "the loop variable `k` is only used to index `history`",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/skill_agent/file_tools.rs",
+      "line": 91,
+      "code": "clippy::unnecessary_sort_by",
+      "message": "consider using `sort_by_key`",
+      "count": 2
+    },
+    {
+      "file": "src/ai_service/tools/web_search.rs",
+      "line": 853,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/api/asr.rs",
+      "line": 202,
+      "code": "clippy::type_complexity",
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "count": 2
+    },
+    {
+      "file": "src/api/character.rs",
+      "line": 111,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 2
+    },
+    {
+      "file": "src/api/character.rs",
+      "line": 123,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 2
+    },
+    {
+      "file": "src/api/character.rs",
+      "line": 130,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 2
+    },
+    {
+      "file": "src/api/font.rs",
+      "line": 104,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 2
+    },
+    {
+      "file": "src/api/font.rs",
+      "line": 114,
+      "code": "clippy::unnecessary_sort_by",
+      "message": "consider using `sort_by_key`",
+      "count": 2
+    },
+    {
+      "file": "src/api/font.rs",
+      "line": 268,
+      "code": "clippy::unnecessary_sort_by",
+      "message": "consider using `sort_by_key`",
+      "count": 2
+    },
+    {
+      "file": "src/api/game.rs",
+      "line": 156,
+      "code": "clippy::filter_map_identity",
+      "message": "use of `filter_map` with an identity function",
+      "count": 2
+    },
+    {
+      "file": "src/api/game.rs",
+      "line": 474,
+      "code": "clippy::manual_unwrap_or_default",
+      "message": "match can be simplified with `.unwrap_or_default()`",
+      "count": 2
+    },
+    {
+      "file": "src/api/lighting_archive/mod.rs",
+      "line": 17,
+      "code": "unused_imports",
+      "message": "unused import: `StagedAsset`",
+      "count": 2
+    },
+    {
+      "file": "src/api/lighting_archive/tests_export.rs",
+      "line": 169,
+      "code": "clippy::redundant_closure",
+      "message": "redundant closure",
+      "count": 1
+    },
+    {
+      "file": "src/api/lighting_archive/tests_export.rs",
+      "line": 406,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/api/lighting_archive/validate.rs",
+      "line": 19,
+      "code": "dead_code",
+      "message": "field `staging` is never read",
+      "count": 1
+    },
+    {
+      "file": "src/api/lighting_archive/validate.rs",
+      "line": 24,
+      "code": "dead_code",
+      "message": "fields `id` and `media_type` are never read",
+      "count": 1
+    },
+    {
+      "file": "src/api/lighting_archive/validate.rs",
+      "line": 25,
+      "code": "dead_code",
+      "message": "field `media_type` is never read",
+      "count": 1
+    },
+    {
+      "file": "src/api/lighting_archive/validate.rs",
+      "line": 31,
+      "code": "dead_code",
+      "message": "fields `archive_path`, `byte_size`, `width`, and `height` are never read",
+      "count": 2
+    },
+    {
+      "file": "src/api/role_archive/mod.rs",
+      "line": 135,
+      "code": "clippy::empty_line_after_outer_attr",
+      "message": "empty line after outer attribute",
+      "count": 2
+    },
+    {
+      "file": "src/api/scene.rs",
+      "line": 315,
+      "code": "clippy::redundant_closure",
+      "message": "redundant closure",
+      "count": 2
+    },
+    {
+      "file": "src/api/scene_lighting/asset.rs",
+      "line": 52,
+      "code": "clippy::needless_return",
+      "message": "unneeded `return` statement",
+      "count": 2
+    },
+    {
+      "file": "src/api/scene_lighting/tests.rs",
+      "line": 31,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/api/scene_lighting/tests.rs",
+      "line": 173,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/api/scene_lighting/tests.rs",
+      "line": 257,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/api/scene_lighting/tests.rs",
+      "line": 300,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/api/script_editor/validate.rs",
+      "line": 386,
+      "code": "clippy::manual_contains",
+      "message": "using `contains()` instead of `iter().any()` is more efficient",
+      "count": 2
+    },
+    {
+      "file": "src/api/script_editor/validate.rs",
+      "line": 1608,
+      "code": "clippy::explicit_auto_deref",
+      "message": "deref which would be done by auto-deref",
+      "count": 2
+    },
+    {
+      "file": "src/api/workshop.rs",
+      "line": 387,
+      "code": "clippy::unnecessary_map_or",
+      "message": "this `map_or` can be simplified",
+      "count": 2
+    },
+    {
+      "file": "src/cast/server.rs",
+      "line": 296,
+      "code": "clippy::useless_conversion",
+      "message": "useless conversion to the same type: `std::string::String`",
+      "count": 2
+    },
+    {
+      "file": "src/cast/server.rs",
+      "line": 343,
+      "code": "clippy::useless_conversion",
+      "message": "useless conversion to the same type: `std::string::String`",
+      "count": 2
+    },
+    {
+      "file": "src/cast/server.rs",
+      "line": 351,
+      "code": "clippy::useless_conversion",
+      "message": "useless conversion to the same type: `std::string::String`",
+      "count": 2
+    },
+    {
+      "file": "src/cast/server.rs",
+      "line": 645,
+      "code": "clippy::unnecessary_cast",
+      "message": "casting to the same type is unnecessary (`i32` -> `i32`)",
+      "count": 1
+    },
+    {
+      "file": "src/config/tts_test.rs",
+      "line": 16,
+      "code": "clippy::field_reassign_with_default",
+      "message": "field assignment outside of initializer for an instance created with Default::default()",
+      "count": 1
+    },
+    {
+      "file": "src/db/managers/save_repo.rs",
+      "line": 52,
+      "code": "clippy::needless_borrows_for_generic_args",
+      "message": "the borrowed expression implements the required traits",
+      "count": 2
+    },
+    {
+      "file": "src/db/managers/save_repo.rs",
+      "line": 122,
+      "code": "dead_code",
+      "message": "associated function `update_save_last_message` is never used",
+      "count": 2
+    },
+    {
+      "file": "src/db/managers/save_repo.rs",
+      "line": 417,
+      "code": "clippy::unused_enumerate_index",
+      "message": "you seem to use `.enumerate()` and immediately discard the index",
+      "count": 2
+    },
+    {
+      "file": "src/init/mod.rs",
+      "line": 41,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/init/mod.rs",
+      "line": 63,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/init/mod.rs",
+      "line": 65,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/init/mod.rs",
+      "line": 68,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/init/mod.rs",
+      "line": 84,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/init/mod.rs",
+      "line": 85,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/init/mod.rs",
+      "line": 144,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/init/mod.rs",
+      "line": 145,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/init/voice_cleanup.rs",
+      "line": 33,
+      "code": "clippy::filter_map_identity",
+      "message": "use of `filter_map` with an identity function",
+      "count": 2
+    },
+    {
+      "file": "src/lan_sync/discovery.rs",
+      "line": 345,
+      "code": "clippy::while_let_loop",
+      "message": "this loop could be written as a `while let` loop",
+      "count": 2
+    },
+    {
+      "file": "src/lan_sync/server.rs",
+      "line": 231,
+      "code": "clippy::unnecessary_to_owned",
+      "message": "unnecessary use of `to_path_buf`",
+      "count": 2
+    },
+    {
+      "file": "src/lan_sync/sync_engine.rs",
+      "line": 133,
+      "code": "clippy::manual_checked_ops",
+      "message": "manual checked division",
+      "count": 2
+    },
+    {
+      "file": "src/lan_sync/sync_engine.rs",
+      "line": 313,
+      "code": "clippy::manual_checked_ops",
+      "message": "manual checked division",
+      "count": 2
+    },
+    {
+      "file": "src/lan_sync/sync_engine.rs",
+      "line": 459,
+      "code": "clippy::too_many_arguments",
+      "message": "this function has too many arguments (8/7)",
+      "count": 2
+    },
+    {
+      "file": "src/lib.rs",
+      "line": 300,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/lib.rs",
+      "line": 479,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/lib.rs",
+      "line": 497,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/lib.rs",
+      "line": 498,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/lib.rs",
+      "line": 577,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/migration/m20240101_000001_create_tables.rs",
+      "line": 319,
+      "code": "clippy::enum_variant_names",
+      "message": "variant name starts with the enum's name",
+      "count": 2
+    },
+    {
+      "file": "src/plugins/http_host.rs",
+      "line": 42,
+      "code": "clippy::explicit_auto_deref",
+      "message": "deref which would be done by auto-deref",
+      "count": 2
+    },
+    {
+      "file": "src/plugins/importer.rs",
+      "line": 274,
+      "code": "clippy::needless_question_mark",
+      "message": "enclosing `Ok` and `?` operator are unneeded",
+      "count": 2
+    },
+    {
+      "file": "src/plugins/manager.rs",
+      "line": 100,
+      "code": "clippy::ptr_arg",
+      "message": "writing `&PathBuf` instead of `&Path` involves a new object where a slice will do",
+      "count": 2
+    },
+    {
+      "file": "src/plugins/manager.rs",
+      "line": 220,
+      "code": "clippy::manual_inspect",
+      "message": "using `map_err` over `inspect_err`",
+      "count": 2
+    },
+    {
+      "file": "src/plugins/python_backend.rs",
+      "line": 53,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/plugins/python_backend.rs",
+      "line": 187,
+      "code": "clippy::explicit_auto_deref",
+      "message": "deref which would be done by auto-deref",
+      "count": 2
+    },
+    {
+      "file": "src/plugins/types.rs",
+      "line": 22,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    },
+    {
+      "file": "src/resource_sync/mod.rs",
+      "line": 196,
+      "code": "clippy::needless_borrow",
+      "message": "this expression creates a reference which is immediately dereferenced by the compiler",
+      "count": 2
+    },
+    {
+      "file": "src/utils/cpu_perf.rs",
+      "line": 40,
+      "code": "clippy::new_without_default",
+      "message": "you should consider adding a `Default` implementation for `CpuDetectionCache`",
+      "count": 2
+    },
+    {
+      "file": "src/utils/cpu_perf.rs",
+      "line": 354,
+      "code": "clippy::double_ended_iterator_last",
+      "message": "called `Iterator::last` on a `DoubleEndedIterator`; this will needlessly iterate the entire iterator",
+      "count": 2
+    },
+    {
+      "file": "src/utils/file_logger.rs",
+      "line": 99,
+      "code": "clippy::collapsible_if",
+      "message": "this `if` statement can be collapsed",
+      "count": 2
+    },
+    {
+      "file": "src/utils/gpu_perf.rs",
+      "line": 38,
+      "code": "clippy::new_without_default",
+      "message": "you should consider adding a `Default` implementation for `GpuDetectionCache`",
+      "count": 2
+    },
+    {
+      "file": "src/utils/gpu_perf.rs",
+      "line": 228,
+      "code": "clippy::doc_lazy_continuation",
+      "message": "doc list item without indentation",
+      "count": 2
+    },
+    {
+      "file": "src/utils/gpu_perf.rs",
+      "line": 551,
+      "code": "clippy::map_identity",
+      "message": "unnecessary map of the identity function",
+      "count": 2
+    },
+    {
+      "file": "src/utils/log_bridge.rs",
+      "line": 98,
+      "code": "clippy::derivable_impls",
+      "message": "this `impl` can be derived",
+      "count": 2
+    }
+  ]
+}

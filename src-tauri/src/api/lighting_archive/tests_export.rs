@@ -447,3 +447,65 @@ fn transparent_png() -> Vec<u8> {
         .unwrap();
     bytes
 }
+
+#[tokio::test]
+async fn task18_rebuildable_neutral_fixture_inspect_commit_export_roundtrip() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/lighting-presets/neutral.linglight");
+    let data = tempfile::tempdir().unwrap();
+    let store = LightingPresetStore::new(data.path());
+    let state = LingLightImportState::default();
+    let inspection = inspect_linglight_path(&path, &state, &store).await.unwrap();
+    assert!(inspection.warnings.is_empty());
+    let imported = commit_linglight_import_inner(
+        &inspection.token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap()
+    .preset;
+    assert_eq!(imported.name, "Portable Neutral");
+    let neutral = crate::ai_service::game_system::lighting_presets::builtin_presets()
+        .into_iter()
+        .find(|preset| preset.id == "builtin:neutral")
+        .unwrap();
+    assert_eq!(imported.lighting, neutral.lighting);
+    assert!(uuid::Uuid::parse_str(imported.id.strip_prefix("user:").unwrap()).is_ok());
+    let output = tempfile::tempdir().unwrap();
+    let target = output.path().join("neutral.linglight");
+    export_linglight_path(&imported.id, &target, &store, data.path())
+        .await
+        .unwrap();
+    let validated = validate_linglight(&target, ArchiveLimits::default()).unwrap();
+    assert_eq!(validated.manifest.lighting, imported.lighting);
+    assert_eq!(validated.manifest.origin_id, imported.origin_id);
+    assert!(validated.assets.is_empty());
+    let file = std::fs::File::open(target).unwrap();
+    let mut archive = zip::ZipArchive::new(file).unwrap();
+    let mut manifest = String::new();
+    archive
+        .by_name("manifest.json")
+        .unwrap()
+        .read_to_string(&mut manifest)
+        .unwrap();
+    let wire: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(wire["format"], "linglight");
+    assert_eq!(wire["version"], 1);
+    for forbidden in [
+        "preset",
+        "origin",
+        "created_at",
+        "updated_at",
+        "scene",
+        "background",
+    ] {
+        assert!(
+            wire.get(forbidden).is_none(),
+            "unexpected field: {forbidden}"
+        );
+    }
+}
