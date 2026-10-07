@@ -11,7 +11,7 @@ use crate::ai_service::game_system::scene_store::{LightingParams, Scene, SceneSt
 use crate::ai_service::game_system::scene_transition::{
     SceneSelection, SceneStatePayload, StoredSceneSelection, resolve_startup_selection,
     restore_snapshot_scene, transition_scene_by_id, transition_scene_selection,
-    transition_scene_update,
+    transition_scene_update_with_intent,
 };
 use crate::ai_service::service::AIService;
 use crate::api::data_dir;
@@ -68,6 +68,9 @@ pub struct UpdateSceneRequest {
     pub lighting_preset_revision: Option<u32>,
     #[serde(default)]
     pub lighting_customized: bool,
+    /// Explicit default-save intent; omitted by ordinary scene editors.
+    #[serde(default)]
+    pub apply_lighting_as_default: bool,
 }
 
 // ========== Helpers ==========
@@ -340,8 +343,12 @@ pub async fn create_scene(_app: AppHandle, req: CreateSceneRequest) -> Result<Sc
 
 #[tauri::command]
 pub async fn update_scene(app: AppHandle, req: UpdateSceneRequest) -> Result<SceneInfo, String> {
+    // Serialize persistence and the resulting runtime event with other service
+    // operations. Never wait for this lock after committing a captured snapshot:
+    // another update could otherwise commit/apply first and then be rolled back.
+    let state = app.state::<AppState>();
+    let service = state.ai_service.lock().await;
     let store = SceneStore::new(&data_dir());
-    let scene_id = req.id.clone();
     let (previous, updated) = store
         .mutate(|scenes| {
             let scene = scenes
@@ -363,13 +370,15 @@ pub async fn update_scene(app: AppHandle, req: UpdateSceneRequest) -> Result<Sce
 
     let info = model_to_info(&updated);
     let resolved_background = normalize_background(&updated.background);
-    let state = app.state::<AppState>();
-    let service = state.ai_service.lock().await;
     let mut game_status = service.game_status.lock().await;
     let runtime = game_status.scene_runtime_state();
-    if runtime.current_scene_id.as_deref() == Some(scene_id.as_str()) {
-        let transition =
-            transition_scene_update(&runtime, &previous, updated, resolved_background)?;
+    if let Some(transition) = transition_scene_update_with_intent(
+        &runtime,
+        &previous,
+        updated,
+        resolved_background,
+        req.apply_lighting_as_default,
+    )? {
         let payload = SceneStatePayload::from(&transition);
         game_status.apply_scene_transition(&transition);
         drop(game_status);
@@ -460,6 +469,61 @@ pub async fn set_scene_awareness(app: AppHandle, enabled: bool) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scene_update_serializes_store_write_runtime_snapshot_and_emit_under_service_lock() {
+        // Like game::reset_lock_tests, check the real command scope without mocking
+        // a separate lock model or requiring a running AppHandle/database.
+        let source = include_str!("scene.rs");
+        let body = source
+            .split("pub async fn update_scene(")
+            .nth(1)
+            .unwrap()
+            .split("fn delete_scene_from_store(")
+            .next()
+            .unwrap();
+        let lock = body.find("state.ai_service.lock().await").unwrap();
+        let mutation = body.find(".mutate(|scenes|").unwrap();
+        let snapshot = body.find("game_status.scene_runtime_state()").unwrap();
+        let emit = body.find("emit_scene_state(&app, &payload)").unwrap();
+        assert!(
+            lock < mutation,
+            "store writes must not overtake runtime events"
+        );
+        assert!(mutation < snapshot && snapshot < emit);
+        assert_eq!(body.matches("state.ai_service.lock().await").count(), 1);
+        assert!(!body[lock..emit].contains("drop(service)"));
+    }
+
+    #[test]
+    fn scene_update_forwards_explicit_default_intent_to_runtime_transition() {
+        let source = include_str!("scene.rs");
+        let body = source
+            .split("pub async fn update_scene(")
+            .nth(1)
+            .unwrap()
+            .split("fn delete_scene_from_store(")
+            .next()
+            .unwrap();
+        assert!(body.contains("transition_scene_update_with_intent("));
+        assert!(body.contains("req.apply_lighting_as_default"));
+    }
+
+    #[test]
+    fn update_request_defaults_intent_to_false_and_accepts_explicit_true() {
+        let legacy = serde_json::json!({
+            "id": "captured", "scene_name": "Name",
+            "scene_description": "Description", "background": "old.png"
+        });
+        let req: UpdateSceneRequest = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(!req.apply_lighting_as_default);
+        assert!(req.lighting.is_none());
+        let mut explicit = legacy;
+        explicit["apply_lighting_as_default"] = serde_json::json!(true);
+        let req: UpdateSceneRequest = serde_json::from_value(explicit).unwrap();
+        assert!(req.apply_lighting_as_default);
+        assert_eq!(req.id, "captured");
+    }
 
     #[test]
     fn deleting_scene_preserves_shared_background_then_removes_orphan() {

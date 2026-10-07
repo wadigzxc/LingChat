@@ -19,11 +19,43 @@ import {
   saveActiveLightingAsSceneDefault,
   updateLightingPreset,
 } from "@/api/services/scene-lighting";
-import { getSceneLightingMetadata, getSceneLightingMetadataForSave } from "@/api/services/scene";
+import {
+  getSceneLightingMetadata,
+  getSceneLightingMetadataForSave,
+  updateScene,
+  type UpdateSceneRequest,
+} from "@/api/services/scene";
 import { lighting, scene } from "@/test/scene-lighting-fixtures";
 
 describe("scene lighting command wrappers", () => {
   beforeEach(() => invoke.mockClear());
+
+  it("forwards explicit default intent without adding it to legacy ordinary edits", async () => {
+    const ordinary: UpdateSceneRequest = {
+      id: "captured",
+      scene_name: "Name",
+      scene_description: "Description",
+      background: "captured.png",
+      lighting: lighting(),
+      lighting_preset_id: "user:captured",
+      lighting_preset_revision: 4,
+      lighting_customized: true,
+    };
+    await updateScene(ordinary);
+    const explicit: UpdateSceneRequest = { ...ordinary, apply_lighting_as_default: true };
+    await updateScene(explicit);
+    expect(invoke.mock.calls).toEqual([
+      ["update_scene", { req: ordinary }],
+      ["update_scene", { req: explicit }],
+    ]);
+    expect((invoke.mock.calls[0]![1] as { req: UpdateSceneRequest }).req).not.toHaveProperty(
+      "apply_lighting_as_default"
+    );
+    expect((invoke.mock.calls[1]![1] as { req: UpdateSceneRequest }).req).toHaveProperty(
+      "apply_lighting_as_default",
+      true
+    );
+  });
 
   it("uses the exact Rust command names and argument keys", async () => {
     const draft = {

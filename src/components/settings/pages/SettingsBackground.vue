@@ -1,7 +1,7 @@
 <template>
   <MenuPage>
     <!-- ========== 场景管理 ========== -->
-    <MenuItem :title="$t('settings.background.scene.title')">
+    <MenuItem :title="lightingText('sceneSettingsTitle', '场景及光影设置')">
       <template #header>
         <PictureInPicture :size="20" />
       </template>
@@ -32,6 +32,7 @@
           <button
             class="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm font-bold
               text-white/80 shadow-lg transition-all hover:bg-white/20"
+            :disabled="uploadingBackground"
             @click="triggerUpload"
           >
             {{ $t("settings.background.scene.upload") }}
@@ -40,6 +41,7 @@
             v-if="!isAndroid()"
             class="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm font-bold
               text-white/80 shadow-lg transition-all hover:bg-white/20"
+            :disabled="openingFolder"
             @click="handleOpenFolder"
           >
             {{ $t("settings.background.scene.openFolder") }}
@@ -47,7 +49,7 @@
           <button
             class="rounded-full border border-red-500/30 bg-red-500/20 px-4 py-1.5 text-sm font-bold
               text-red-300 shadow-lg transition-all hover:bg-red-500/30"
-            :disabled="!currentScene"
+            :disabled="!currentScene || deletingScene"
             @click="handleDeleteScene"
           >
             {{ $t("settings.background.scene.delete") }}
@@ -55,10 +57,23 @@
         </div>
       </div>
 
+      <p data-active-lighting-status role="status" class="mb-3 text-sm text-white/80">
+        {{ activeLightingStatus }}
+      </p>
+      <LightingQualityToggle class="mb-3 text-white" />
       <LightingPresetSelect
         :refresh-key="lightingPresetVersion"
         :active-preset-id="gameStore.activeLightingPresetId"
+        @loaded="handlePresetsLoaded"
       />
+      <button
+        data-save-scene-default
+        :disabled="!canSaveSceneDefault || savingDefault"
+        @click="handleSaveSceneDefault"
+        class="my-3 rounded-lg border border-white/20 px-4 py-2 text-white disabled:opacity-40"
+      >
+        {{ lightingText("saveSceneDefault", "保存为当前场景默认") }}
+      </button>
       <button
         data-manage-lighting
         class="my-3 rounded-lg border border-white/20 px-4 py-2 text-white"
@@ -81,6 +96,8 @@
         <div
           v-for="scene in paginatedScenes"
           :key="scene.id"
+          :data-scene-card="scene.id"
+          :aria-busy="selectingScene"
           :class="[
             `group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border
             border-white/12.5 bg-white/10
@@ -112,32 +129,21 @@
             class="absolute top-2 left-2 z-10"
           />
 
-          <!-- 背景预览 -->
-          <div
-            class="relative flex-1 overflow-hidden after:pointer-events-none after:absolute
-              after:inset-0 after:bg-linear-to-b after:from-transparent after:to-black/30"
-          >
-            <img
-              v-if="scene.background"
-              :src="convertFileSrc(scene.background)"
-              :alt="scene.scene_name"
-              class="aspect-video h-full w-full object-cover transition-transform duration-300
-                group-hover:scale-[1.03]"
-            />
-            <div
-              v-else
-              class="flex aspect-video h-full w-full items-center justify-center bg-black/40
-                text-white/20"
-            >
-              <Image :size="48" />
-            </div>
-          </div>
+          <SceneCardLightingPreview
+            :lighting="scene.lighting"
+            :background="scene.background"
+            :name="scene.scene_name"
+            :simplified="settingsStore.display.simplifiedLighting"
+          />
 
           <!-- 信息栏 -->
           <div
             class="relative z-2 flex flex-col gap-1 border-t border-white/20 bg-white/15 px-4 py-3
               backdrop-blur-[10px]"
           >
+            <span data-card-lighting-label class="text-xs text-sky-200">{{
+              sceneLightingLabel(scene)
+            }}</span>
             <span class="truncate font-medium text-white/90 drop-shadow-md">
               {{ scene.scene_name }}
             </span>
@@ -193,6 +199,7 @@
       <!-- 隐藏的文件上传 input -->
       <input
         type="file"
+        :disabled="uploadingBackground"
         ref="uploadInput"
         @change="handleFileUpload"
         accept=".jpg,.jpeg,.png,.webp,.bmp,.svg,.tif,.gif"
@@ -517,7 +524,6 @@
 <script setup lang="ts">
   import { ref, onMounted, watch, computed } from "vue";
   import { useI18n } from "vue-i18n";
-  import { convertFileSrc } from "@tauri-apps/api/core";
   import { MenuPage, MenuItem } from "../../ui";
   import { Button, Toggle, Slider } from "../../base";
   import { useGameStore } from "../../../stores/modules/game";
@@ -536,6 +542,7 @@
     type SceneInfo,
     type SceneLightingMetadata,
     type LightingParams,
+    type UpdateSceneRequest,
   } from "../../../api/services/scene";
   import type { BackgroundImageInfo } from "../../../types";
   import {
@@ -562,7 +569,6 @@
     type GpuInfo,
   } from "../../../api/services/gpu-perf";
   import {
-    Image,
     PictureInPicture,
     Sparkles,
     Settings,
@@ -572,12 +578,47 @@
     RefreshCw,
   } from "lucide-vue-next";
   import { useLightingOperation } from "../lighting/useLightingOperation";
-  const { text: lightingText } = useLightingOperation();
+  const { text: lightingText, presetName } = useLightingOperation();
+  import type { LightingPreset } from "@/types/scene-lighting";
+  const lightingPresets = ref<LightingPreset[]>([]);
+  const presetsLoaded = ref(false);
+  const handlePresetsLoaded = (presets: LightingPreset[]) => {
+    lightingPresets.value = presets;
+    presetsLoaded.value = true;
+  };
+  const lightingProvenance = (id: string | null, revision: number | null, customized: boolean) => {
+    const preset = lightingPresets.value.find((p) => p.id === id);
+    const name = preset ? presetName(preset) : (id ?? lightingText("custom", "自定义"));
+    return [
+      name,
+      id && !preset && presetsLoaded.value ? lightingText("sourceDeleted", "来源已删除") : "",
+      revision == null ? "" : `r${revision}`,
+      customized ? lightingText("customized", "已自定义") : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  };
+  const sceneLightingLabel = (scene: SceneInfo) =>
+    !scene.lighting
+      ? lightingText("neutral", "系统中性")
+      : lightingProvenance(scene.lighting_preset_id, null, scene.lighting_customized);
+  const activeLightingStatus = computed(() => {
+    const source = gameStore.activeLightingSource;
+    const state =
+      source === "manual" || source === "ai"
+        ? lightingText("temporary", "临时")
+        : source === "scene_default"
+          ? lightingText("sceneDefault", "场景默认")
+          : lightingText("neutral", "系统中性");
+    return `${state} · ${lightingProvenance(gameStore.activeLightingPresetId, gameStore.activeLightingPresetRevision, gameStore.activeLightingCustomized)}`;
+  });
   import LightingPresetSelect from "../lighting/LightingPresetSelect.vue";
+  import LightingQualityToggle from "../lighting/LightingQualityToggle.vue";
   import LightingPresetManager from "../lighting/LightingPresetManager.vue";
   const showLightingManager = ref(false);
   const lightingPresetVersion = ref(0);
   import SceneEditModal from "../scene/SceneEditModal.vue";
+  import SceneCardLightingPreview from "../scene/SceneCardLightingPreview.vue";
   import DialogAppearancePanel from "../dialog/DialogAppearancePanel.vue";
   import PluginTag from "@/components/ui/PluginTag.vue";
   import { useUserStore } from "../../../stores/modules/user/user";
@@ -674,7 +715,7 @@
   );
 
   const scenes = ref<SceneInfo[]>([]);
-  const refreshing = ref(false);
+  const { pending: refreshing, run: runSceneRefresh } = useLightingOperation();
 
   // 分页
   const ITEMS_PER_PAGE = 6;
@@ -706,61 +747,63 @@
     () => gameStore.currentScene?.scene_name || t("settings.background.scene.none")
   );
   const currentScene = computed(() => gameStore.currentScene);
+  const canSaveSceneDefault = computed(
+    () => currentScene.value && (!currentScene.value.source || currentScene.value.source === "game")
+  );
+  const { pending: savingDefault, run: runDefaultSave } = useLightingOperation();
+  const handleSaveSceneDefault = () => {
+    const scene = currentScene.value;
+    if (!scene || !canSaveSceneDefault.value) return;
+    const req: UpdateSceneRequest = JSON.parse(
+      JSON.stringify({
+        id: scene.id,
+        scene_name: scene.scene_name,
+        scene_description: scene.scene_description,
+        background: scene.background ?? "",
+        lighting: gameStore.activeLighting,
+        lighting_preset_id: gameStore.activeLightingPresetId,
+        lighting_preset_revision: gameStore.activeLightingPresetRevision,
+        lighting_customized: gameStore.activeLightingCustomized,
+        apply_lighting_as_default: true,
+      })
+    );
+    return runDefaultSave(
+      async () => {
+        await updateScene(req);
+        await fetchScenes();
+      },
+      lightingText("sceneDefaultSaved", "已保存为当前场景默认")
+    );
+  };
 
   const fetchScenes = async () => {
-    try {
-      scenes.value = await listScenes();
-    } catch (error) {
-      console.error("获取场景列表失败", error);
-    }
+    scenes.value = await listScenes();
   };
 
-  const handleRefreshScenes = async () => {
-    if (refreshing.value) return;
-    refreshing.value = true;
-    try {
+  const handleRefreshScenes = () =>
+    runSceneRefresh(async () => {
       await Promise.all([fetchScenes(), refreshBackground()]);
-      uiStore.showSuccess({
-        title: t("settings.background.scene.refreshSuccess"),
-        duration: 2000,
-      });
-    } finally {
-      refreshing.value = false;
-    }
-  };
+    }, t("settings.background.scene.refreshSuccess"));
 
   const isSceneSelected = (sceneId: string): boolean => {
     return gameStore.currentScene?.id === sceneId;
   };
 
-  const handleSceneClick = async (scene: SceneInfo) => {
-    // 点击当前已激活的场景则取消选中，背景默认为透明
-    if (gameStore.currentScene?.id === scene.id) {
-      try {
-        await selectScene(null);
-        unlockAchievement("see_through").catch(console.error);
-        await fetchScenes();
-      } catch (error) {
-        console.error("取消场景失败", error);
+  const { pending: selectingScene, run: runSceneSelection } = useLightingOperation();
+  const handleSceneClick = (scene: SceneInfo) => {
+    const sceneId = gameStore.currentScene?.id === scene.id ? null : scene.id;
+    return runSceneSelection(async () => {
+      if (sceneId && !scene.scene_description?.trim()) {
+        uiStore.showInfo({
+          title: t("settings.background.scene.tip"),
+          message: t("settings.background.scene.noDescriptionTip", { name: scene.scene_name }),
+          duration: 4000,
+        });
       }
-      return;
-    }
-
-    // 无描述时提醒用户
-    if (!scene.scene_description?.trim()) {
-      uiStore.showInfo({
-        title: t("settings.background.scene.tip"),
-        message: t("settings.background.scene.noDescriptionTip", { name: scene.scene_name }),
-        duration: 4000,
-      });
-    }
-
-    try {
-      await selectScene(scene.id);
+      await selectScene(sceneId);
+      if (sceneId === null) unlockAchievement("see_through").catch(console.error);
       await fetchScenes();
-    } catch (error) {
-      console.error("选择场景失败", error);
-    }
+    });
   };
 
   const handleWrenchClick = (scene: SceneInfo) => {
@@ -783,25 +826,24 @@
     showSceneEdit.value = true;
   };
 
-  const handleDeleteScene = async () => {
-    if (!currentScene.value) return;
-    if (currentScene.value.source && currentScene.value.source !== "game") {
-      await dialogStore.alert(t("settings.background.scene.pluginNotDeletable"));
-      return;
-    }
-    if (
-      !(await dialogStore.confirm(
-        t("settings.background.scene.deleteConfirm", { name: currentScene.value.scene_name })
-      ))
-    )
-      return;
-
-    try {
-      await deleteScene(currentScene.value.id);
+  const { pending: deletingScene, run: runSceneDelete } = useLightingOperation();
+  const handleDeleteScene = () => {
+    const scene = currentScene.value;
+    if (!scene) return;
+    return runSceneDelete(async () => {
+      if (scene.source && scene.source !== "game") {
+        await dialogStore.alert(t("settings.background.scene.pluginNotDeletable"));
+        return;
+      }
+      if (
+        !(await dialogStore.confirm(
+          t("settings.background.scene.deleteConfirm", { name: scene.scene_name })
+        ))
+      )
+        return;
+      await deleteScene(scene.id);
       await fetchScenes();
-    } catch (error) {
-      console.error("删除场景失败", error);
-    }
+    });
   };
 
   const handleSceneSubmit = async (
@@ -844,15 +886,9 @@
   };
 
   onMounted(async () => {
-    try {
-      await refreshBackground();
-    } catch (error) {
-      console.error("加载背景图片失败", error);
-    }
-
-    await fetchScenes();
-
-    // 加载 CPU + GPU 性能信息
+    await runSceneRefresh(async () => {
+      await Promise.all([refreshBackground(), fetchScenes()]);
+    });
     await fetchPerfInfo();
   });
 
@@ -909,17 +945,12 @@
   }
 
   async function fetchBackgrounds(): Promise<BackgroundImageInfo[]> {
-    try {
-      const data = await getBackgroundImages();
-      return data.map((background: BackgroundImageInfo) => ({
-        title: background.title || "Untitled",
-        url: background.url || "",
-        time: background.time,
-      }));
-    } catch (error) {
-      console.error("Failed to fetch background list:", error);
-      return [];
-    }
+    const data = await getBackgroundImages();
+    return data.map((background: BackgroundImageInfo) => ({
+      title: background.title || "Untitled",
+      url: background.url || "",
+      time: background.time,
+    }));
   }
 
   async function refreshBackground(): Promise<void> {
@@ -931,49 +962,35 @@
     uploadInput.value?.click();
   }
 
-  async function handleFileUpload(event: Event): Promise<void> {
+  const { pending: uploadingBackground, run: runBackgroundUpload } = useLightingOperation();
+  function handleFileUpload(event: Event) {
     const target = event.target as HTMLInputElement;
     const file = target.files?.[0];
     if (!file) return;
-
-    const fileName = file.name;
-    const fileExt = fileName.slice(fileName.lastIndexOf(".")).toLowerCase();
-    const allowedExts = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".svg", ".tif", ".gif"];
-
-    if (!allowedExts.includes(fileExt)) {
-      await dialogStore.alert(
-        t("settings.background.upload.invalidFormat", { formats: allowedExts.join(", ") })
-      );
-      return;
-    }
-
-    try {
+    return runBackgroundUpload(async () => {
+      const fileName = file.name;
+      const fileExt = fileName.slice(fileName.lastIndexOf(".")).toLowerCase();
+      const allowedExts = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".svg", ".tif", ".gif"];
+      if (!allowedExts.includes(fileExt)) {
+        await dialogStore.alert(
+          t("settings.background.upload.invalidFormat", { formats: allowedExts.join(", ") })
+        );
+        return;
+      }
       const buf = await file.arrayBuffer();
       await uploadBackgroundImage(fileName, new Uint8Array(buf));
       await refreshBackground();
-      // 刷新场景列表（后端会自动将新背景注册为场景）
       await fetchScenes();
-      if (target) target.value = "";
-    } catch (error) {
-      console.error("上传失败", error);
-      await dialogStore.alert(t("settings.background.upload.failed"));
-    }
+      target.value = "";
+    });
   }
 
   function updateParticle(value: string): void {
     uiStore.setBackgroundEffect(value);
   }
 
-  async function handleOpenFolder(): Promise<void> {
-    try {
-      await openBackgroundsFolder();
-    } catch (e: any) {
-      uiStore.showError({
-        title: t("settings.background.folder.errorTitle"),
-        message: t("settings.background.folder.openFailed"),
-      });
-    }
-  }
+  const { pending: openingFolder, run: runOpenFolder } = useLightingOperation();
+  const handleOpenFolder = () => runOpenFolder(openBackgroundsFolder);
 
   function handleMeteorFpsChange(value: number) {
     const clampedValue = Math.max(10, Math.min(60, value));

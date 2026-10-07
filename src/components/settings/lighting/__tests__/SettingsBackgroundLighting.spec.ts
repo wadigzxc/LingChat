@@ -13,7 +13,12 @@ vi.mock("@/stores/modules/ui/ui", () => ({ useUIStore: () => ui }));
 vi.mock("@/stores/modules/ui/dialog", () => ({ useDialogStore: () => ({}) }));
 vi.mock("@/stores/modules/user/user", () => ({ useUserStore: () => ({}) }));
 vi.mock("@/stores/modules/settings", () => ({
-  useSettingsStore: () => ({ meteorFps: 30, starsFps: 30 }),
+  useSettingsStore: () => ({
+    meteorFps: 30,
+    starsFps: 30,
+    display: { simplifiedLighting: false },
+    update: vi.fn(),
+  }),
 }));
 vi.mock("@/api/services/background", () => ({
   getBackgroundImages: async () => [],
@@ -90,6 +95,10 @@ describe("SettingsBackground Task14 minimal entry", () => {
     expect(invokeMock).toHaveBeenCalledWith("update_scene", {
       req: expect.objectContaining({ id: "old-scene", scene_name: "Edited old" }),
     });
+    const updateArgs = invokeMock.mock.calls.find((call) => call[0] === "update_scene")![1] as {
+      req: Record<string, unknown>;
+    };
+    expect(updateArgs.req).not.toHaveProperty("apply_lighting_as_default");
     expect(w.get("[data-editor-save-error]").text()).toContain("denied save");
     expect(w.find('input[placeholder="settings.sceneEdit.placeholder.sceneName"]').exists()).toBe(
       true

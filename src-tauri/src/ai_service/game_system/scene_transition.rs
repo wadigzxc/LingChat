@@ -247,6 +247,30 @@ pub fn transition_scene_update(
     })
 }
 
+/// Explicit default saves restore provenance even when the saved snapshot is unchanged.
+/// Ordinary edits retain the metadata-only behavior of `transition_scene_update`.
+/// Returns the optional runtime event for an update of the captured scene ID.
+pub fn transition_scene_update_with_intent(
+    current: &SceneRuntimeState,
+    previous: &Scene,
+    updated: Scene,
+    resolved_background: String,
+    apply_lighting_as_default: bool,
+) -> Result<Option<SceneTransition>, String> {
+    if current.current_scene_id.as_deref() != Some(updated.id.as_str()) {
+        return Ok(None);
+    }
+    let transition = if apply_lighting_as_default {
+        transition_scene_selection(
+            current,
+            Some(SceneSelection::new(updated, resolved_background)),
+        )
+    } else {
+        transition_scene_update(current, previous, updated, resolved_background)
+    }?;
+    Ok(Some(transition))
+}
+
 pub fn preserve_temporary_lighting_after_session_reset(
     before: &SceneRuntimeState,
     reset: SceneRuntimeState,
@@ -315,6 +339,143 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".into(),
             plugin_id: None,
         }
+    }
+
+    #[test]
+    fn explicit_default_save_of_identical_snapshot_reclassifies_temporary_source_once() {
+        let mut lighting = LightingParams::default();
+        lighting.master_intensity = 0.25;
+        let saved = scene("scene-1", "stored.png", Some(lighting.clone()));
+        for source in [
+            SceneLightingSource::ManualPreset,
+            SceneLightingSource::ManualCustom,
+            SceneLightingSource::AiPreset,
+        ] {
+            let current = SceneRuntimeState {
+                current_scene_id: Some("scene-1".into()),
+                background: "C:/backgrounds/stored.png".into(),
+                active_lighting: lighting.clone(),
+                source,
+                preset_id: saved.lighting_preset_id.clone(),
+                preset_revision: saved.lighting_preset_revision,
+                customized: saved.lighting_customized,
+                lighting_revision: 20,
+            };
+            let transition = transition_scene_update_with_intent(
+                &current,
+                &saved,
+                saved.clone(),
+                "C:/backgrounds/stored.png".into(),
+                true,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(transition.source, SceneLightingSource::SceneDefault);
+            assert_eq!(transition.active_lighting, lighting);
+            assert_eq!(transition.current_scene_id.as_deref(), Some("scene-1"));
+            assert_eq!(transition.background, "C:/backgrounds/stored.png");
+            assert_eq!(transition.preset_id.as_deref(), Some("preset:test"));
+            assert_eq!(transition.preset_revision, Some(3));
+            assert!(transition.customized);
+            assert_eq!(transition.lighting_revision, 21);
+        }
+    }
+
+    #[test]
+    fn captured_old_scene_save_never_transitions_new_current_or_none() {
+        let saved = scene("scene-1", "stored.png", Some(LightingParams::default()));
+        for current_id in [Some("scene-2".to_string()), None] {
+            let mut current = SceneRuntimeState::neutral(21);
+            current.current_scene_id = current_id;
+            current.background = "new-current.png".into();
+            current.active_lighting.master_intensity = 1.75;
+            current.source = SceneLightingSource::AiPreset;
+            current.preset_id = Some("new:preset".into());
+            current.preset_revision = Some(12);
+            current.customized = true;
+            let before = current.clone();
+            for intent in [true, false] {
+                let event = transition_scene_update_with_intent(
+                    &current,
+                    &saved,
+                    saved.clone(),
+                    "C:/backgrounds/stored.png".into(),
+                    intent,
+                )
+                .unwrap();
+                assert!(
+                    event.is_none(),
+                    "non-current save must not emit or increment revision"
+                );
+                assert_eq!(current, before);
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_update_intent_preserves_manual_and_ai_metadata_only_state() {
+        let previous = scene("scene-1", "stored.png", Some(LightingParams::default()));
+        let mut updated = previous.clone();
+        updated.name = "Renamed".into();
+        updated.description = "Metadata only".into();
+        for source in [
+            SceneLightingSource::ManualPreset,
+            SceneLightingSource::ManualCustom,
+            SceneLightingSource::AiPreset,
+        ] {
+            let mut current = SceneRuntimeState::neutral(20);
+            current.current_scene_id = Some("scene-1".into());
+            current.background = "C:/backgrounds/stored.png".into();
+            current.active_lighting.master_intensity = 0.75;
+            current.source = source;
+            current.preset_id = Some("user:temporary".into());
+            current.preset_revision = Some(9);
+            current.customized = true;
+            let transition = transition_scene_update_with_intent(
+                &current,
+                &previous,
+                updated.clone(),
+                current.background.clone(),
+                false,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(transition.scene.as_ref().unwrap().name, "Renamed");
+            assert_eq!(transition.active_lighting, current.active_lighting);
+            assert_eq!(transition.source, source);
+            assert_eq!(transition.preset_id.as_deref(), Some("user:temporary"));
+            assert_eq!(transition.preset_revision, Some(9));
+            assert!(transition.customized);
+            assert_eq!(transition.lighting_revision, 21);
+        }
+    }
+
+    #[test]
+    fn explicit_default_without_snapshot_keeps_neutral_contract() {
+        let mut saved = scene("scene-1", "stored.png", None);
+        saved.lighting_preset_id = None;
+        saved.lighting_preset_revision = None;
+        saved.lighting_customized = false;
+        let mut current = SceneRuntimeState::neutral(20);
+        current.current_scene_id = Some("scene-1".into());
+        current.active_lighting.master_intensity = 0.75;
+        current.source = SceneLightingSource::AiPreset;
+        let transition = transition_scene_update_with_intent(
+            &current,
+            &saved,
+            saved.clone(),
+            "C:/backgrounds/stored.png".into(),
+            true,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(transition.source, SceneLightingSource::Neutral);
+        assert_eq!(transition.active_lighting, LightingParams::default());
+        assert_eq!(transition.current_scene_id.as_deref(), Some("scene-1"));
+        assert!(transition.preset_id.is_none());
+        assert!(transition.preset_revision.is_none());
+        assert!(!transition.customized);
+        assert_eq!(transition.lighting_revision, 21);
     }
 
     #[test]
