@@ -3,7 +3,15 @@
   import { listLightingPresets, applyLightingPreset } from "@/api/services/scene-lighting";
   import type { LightingPreset, PresetSort } from "@/types/scene-lighting";
   import { matchesLightingPreset } from "@/utils/scene-lighting/search";
-  const props = defineProps<{ refreshKey?: number; activePresetId?: string | null }>();
+  const props = defineProps<{
+    refreshKey?: number;
+    activePresetId?: string | null;
+    draftOnly?: boolean;
+  }>();
+  const emit = defineEmits<{
+    select: [preset: LightingPreset];
+    loaded: [presets: LightingPreset[]];
+  }>();
   const presets = ref<LightingPreset[]>([]);
 
   const query = ref("");
@@ -42,8 +50,14 @@
   const { pending, run, text, presetName: displayName } = useLightingOperation();
   async function load() {
     presets.value = await listLightingPresets("favorite_first");
+    emit("loaded", JSON.parse(JSON.stringify(presets.value)));
   }
   async function apply(id: string) {
+    if (props.draftOnly) {
+      const preset = presets.value.find((p) => p.id === id);
+      if (preset) emit("select", JSON.parse(JSON.stringify(preset)));
+      return;
+    }
     await run(
       async () => {
         await applyLightingPreset(id);

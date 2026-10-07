@@ -8,6 +8,19 @@ beforeEach(() => {
   invokeMock.mockResolvedValue([preset()]);
 });
 describe("LightingPresetSelect DOM", () => {
+  it("emits a deep copied selection in draft-only mode without applying runtime lighting", async () => {
+    const p = preset();
+    invokeMock.mockResolvedValue([p]);
+    const w = mount(LightingPresetSelect, { props: { draftOnly: true }, global: globalOptions() });
+    await flushPromises();
+    invokeMock.mockClear();
+    await w.get('[data-preset="user:one"]').trigger("click");
+    await flushPromises();
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(w.emitted("select")?.[0]?.[0]).toEqual(p);
+    expect(w.emitted("select")?.[0]?.[0]).not.toBe(p);
+    expect(w.emitted("loaded")?.[0]?.[0]).toEqual([p]);
+  });
   it("displays the preset name category color marker and tags", async () => {
     const w = mount(LightingPresetSelect, { global: globalOptions() });
     await flushPromises();

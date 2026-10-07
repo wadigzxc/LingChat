@@ -507,7 +507,8 @@
       :backgrounds="backgroundList"
       :initial-data="editInitialData"
       @close="showSceneEdit = false"
-      @submit="handleSceneSubmit"
+      :scene-key="editingSceneId"
+      :save-scene="handleSceneSubmit"
       @upload="triggerUpload"
     />
   </MenuPage>
@@ -809,10 +810,11 @@
       sceneImage: string | null;
       sceneDescription: string;
       lighting?: LightingParams | null;
-    }
+    },
+    context: { sceneKey?: string | null; mode: "create" | "update" }
   ) => {
     try {
-      if (editMode.value === "create") {
+      if (context.mode === "create") {
         await createScene({
           scene_name: data.sceneName,
           scene_description: data.sceneDescription,
@@ -823,9 +825,9 @@
           lighting_customized: data.lighting_customized,
         });
       } else {
-        if (!editingSceneId.value) return;
+        if (!context.sceneKey) throw new Error("Missing scene ID");
         await updateScene({
-          id: editingSceneId.value,
+          id: context.sceneKey,
           scene_name: data.sceneName,
           scene_description: data.sceneDescription,
           background: data.sceneImage || "",
@@ -835,10 +837,9 @@
           lighting_customized: data.lighting_customized,
         });
       }
-      showSceneEdit.value = false;
       await fetchScenes();
     } catch (error) {
-      console.error("操作失败", error);
+      throw error;
     }
   };
 

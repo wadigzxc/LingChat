@@ -52,6 +52,49 @@ function options() {
   };
 }
 describe("SettingsBackground Task14 minimal entry", () => {
+  it("awaits editor save with the accepted scene ID and leaves the dialog open on API failure", async () => {
+    const scene = {
+      id: "old-scene",
+      scene_name: "Old scene",
+      scene_description: "",
+      background: null,
+      lighting: null,
+      lighting_preset_id: null,
+      lighting_preset_revision: null,
+      lighting_customized: false,
+      source: "game",
+    };
+    invokeMock.mockImplementation(async (cmd) =>
+      cmd === "list_scenes" ? [scene] : cmd === "list_lighting_presets" ? [] : {}
+    );
+    const global = options();
+    global.stubs.SceneEditModal = false as any;
+    const w = mount(SettingsBackground, {
+      global: { ...global, stubs: { ...global.stubs, teleport: true, transition: false } },
+    });
+    await flushPromises();
+    await w.get('[title="settings.background.scene.edit"]').trigger("click");
+    await flushPromises();
+    await w
+      .get('input[placeholder="settings.sceneEdit.placeholder.sceneName"]')
+      .setValue("Edited old");
+    invokeMock.mockImplementation(async (cmd) => {
+      if (cmd === "update_scene") throw new Error("denied save");
+      return cmd === "list_scenes" ? [scene] : [];
+    });
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "settings.sceneEdit.button.update")!
+      .trigger("click");
+    await flushPromises();
+    expect(invokeMock).toHaveBeenCalledWith("update_scene", {
+      req: expect.objectContaining({ id: "old-scene", scene_name: "Edited old" }),
+    });
+    expect(w.get("[data-editor-save-error]").text()).toContain("denied save");
+    expect(w.find('input[placeholder="settings.sceneEdit.placeholder.sceneName"]').exists()).toBe(
+      true
+    );
+  });
   it("opens the manager with active lighting rather than the current scene default", async () => {
     game.activeLighting.master_intensity = 1.8;
     game.currentScene.lighting.master_intensity = 0.2;
