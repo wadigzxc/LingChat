@@ -104,7 +104,9 @@
       </p>
       <ul>
         <li v-for="asset in inspection.assets" :key="asset.id">
-          {{ asset.id }} · {{ asset.sha256 }} · {{ asset.byte_size }} bytes · {{ asset.width }} ×
+          {{ asset.id }} · {{ asset.sha256 }} ·
+          {{ text("assetBytes", `${asset.byte_size} bytes`, { count: asset.byte_size }) }} ·
+          {{ asset.width }} ×
           {{ asset.height }}
         </li>
       </ul>
@@ -113,7 +115,8 @@
       </ul>
       <ul>
         <li v-for="(conflict, i) in inspection.conflicts" :key="i">
-          {{ conflict.kind }} · {{ conflict.existing_name }} · {{ conflict.existing_id }}
+          {{ text(`conflicts.${conflict.kind}`, conflict.kind) }} · {{ conflict.existing_name }} ·
+          {{ conflict.existing_id }}
         </li>
       </ul>
       <label

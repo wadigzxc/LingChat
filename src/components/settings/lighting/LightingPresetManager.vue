@@ -191,7 +191,7 @@
           :data-select="preset.id"
           :value="preset.id"
           v-model="selected"
-          :aria-label="`选择 ${preset.name}`"
+          :aria-label="text('selectPreset', `选择 ${preset.name}`, { name: presetName(preset) })"
         />{{ presetName(preset) }}
         <button :data-edit="preset.id" :disabled="pending" @click="editPreset(preset)">
           {{ text("edit", "编辑") }}</button

@@ -1,4 +1,6 @@
 import { mount } from "@vue/test-utils";
+import { createI18n } from "vue-i18n";
+import settings from "@/locales/zh-CN/settings";
 import { createPinia, setActivePinia } from "pinia";
 import { expect, it } from "vitest";
 import LightingQualityToggle from "../LightingQualityToggle.vue";
@@ -7,7 +9,14 @@ it("changes persistent quality with a labelled native checkbox", async () => {
   const pinia = createPinia();
   setActivePinia(pinia);
   const store = useSettingsStore();
-  const wrapper = mount(LightingQualityToggle, { global: { plugins: [pinia] } });
+  const wrapper = mount(LightingQualityToggle, {
+    global: {
+      plugins: [
+        pinia,
+        createI18n({ legacy: false, locale: "zh-CN", messages: { "zh-CN": { settings } } }),
+      ],
+    },
+  });
   expect(wrapper.get("label").text()).toContain("简化光影");
   const input = wrapper.get("input[type=checkbox]");
   expect((input.element as HTMLInputElement).checked).toBe(false);

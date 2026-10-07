@@ -1,4 +1,14 @@
 export default {
+  lighting: {
+    assetUnavailable: "素材を解決できないか、パスが安全ではありません",
+    invalidAssetHash: "{id}: 素材の SHA-256 形式が無効です",
+    previewWarningTitle: "プレビューの警告",
+    mobileAssetsTitle: "モバイルのライティング",
+    mobileAssetsMessage:
+      "モバイルでは PNG 光素材レイヤーをスキップします。パラメータによるライティングは利用できます。",
+    compatTitle: "ライティング互換モード",
+    compatMessage: "このウィンドウでは加算合成に対応していないため、スクリーンに切り替えました。",
+  },
   roleExport: {
     title: "キャラクターのエクスポート",
     headerWithName: "{name} - エクスポート",

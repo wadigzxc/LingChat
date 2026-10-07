@@ -1,4 +1,13 @@
 export default {
+  lighting: {
+    assetUnavailable: "素材不可解析或路径不安全",
+    invalidAssetHash: "{id}: 素材 SHA-256 格式无效",
+    previewWarningTitle: "预览警告",
+    mobileAssetsTitle: "移动端光影",
+    mobileAssetsMessage: "移动端已跳过 PNG 光影素材层，参数光影仍然可用。",
+    compatTitle: "光影兼容模式",
+    compatMessage: "当前窗口不支持加色混合，已降级为 screen。",
+  },
   roleExport: {
     title: "导出角色",
     headerWithName: "{name} - 导出",

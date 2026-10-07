@@ -1,9 +1,16 @@
-import { ref, reactive, watch, onScopeDispose, type Ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { computed, ref, reactive, watch, onScopeDispose, type Ref } from "vue";
+import {
+  lightingForPlatform,
+  notifySkippedLightingAssets,
+} from "@/utils/scene-lighting/capabilities";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveLightingAsset } from "@/api/services/scene-lighting";
 import type { LightingParams, LightingAssetLayer } from "@/types/scene-lighting";
 /** Draft-scoped resolver: no runtime stores or global resource cache. */
 export function useDraftLightingAssets(lighting: Readonly<Ref<LightingParams>>) {
+  const { t } = useI18n();
+  const renderedLighting = computed(() => lightingForPlatform(lighting.value));
   const urls = reactive(new Map<string, string>());
   const cache = new Map<string, string>();
   const pending = new Map<string, ReturnType<typeof resolveLightingAsset>>();
@@ -15,14 +22,16 @@ export function useDraftLightingAssets(lighting: Readonly<Ref<LightingParams>>) 
   });
   watch(
     lighting,
-    async (input) => {
+    async (source) => {
+      notifySkippedLightingAssets(source);
+      const input = lightingForPlatform(source);
       const current = ++sequence;
       urls.clear();
       warnings.value = [];
       if (!input.enabled) return;
       for (const layer of input.asset_layers) {
         if (!/^[a-f0-9]{64}$/.test(layer.asset_hash)) {
-          warnings.value.push(`${layer.id}: 素材SHA-256格式无效`);
+          warnings.value.push(t("ui.lighting.invalidAssetHash", { id: layer.id }));
           continue;
         }
         const cached = cache.get(layer.asset_hash);
@@ -60,12 +69,16 @@ export function useDraftLightingAssets(lighting: Readonly<Ref<LightingParams>>) 
           }
         } else {
           warnings.value.push(
-            `${layer.id}: ${failure || result?.warning || "素材不可解析或路径不安全"}`
+            `${layer.id}: ${failure || result?.warning || t("ui.lighting.assetUnavailable")}`
           );
         }
       }
     },
     { immediate: true, deep: true }
   );
-  return { warnings, resolveAsset: (layer: LightingAssetLayer) => urls.get(layer.asset_hash) };
+  return {
+    lighting: renderedLighting,
+    warnings,
+    resolveAsset: (layer: LightingAssetLayer) => urls.get(layer.asset_hash),
+  };
 }

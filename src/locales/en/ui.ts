@@ -1,5 +1,15 @@
 // English language pack, maintained from zh-CN/ui.ts（约 196 条）
 export default {
+  lighting: {
+    assetUnavailable: "Asset unavailable or unsafe path",
+    invalidAssetHash: "{id}: Invalid asset SHA-256 format",
+    previewWarningTitle: "Preview warning",
+    mobileAssetsTitle: "Lighting on mobile",
+    mobileAssetsMessage:
+      "PNG lighting asset layers are skipped on mobile. Parameter lighting remains available.",
+    compatTitle: "Lighting compatibility mode",
+    compatMessage: "Additive blending is unavailable in this window; using screen instead.",
+  },
   roleExport: {
     title: "Export Character",
     headerWithName: "{name} - Export",

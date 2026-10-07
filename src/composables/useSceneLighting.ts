@@ -5,9 +5,14 @@ import { useGameStore } from "@/stores/modules/game";
 import { useSettingsStore } from "@/stores/modules/settings";
 import type { LightingAssetLayer } from "@/types/scene-lighting";
 import { normalizeLighting } from "@/utils/scene-lighting/normalize";
+import {
+  lightingForPlatform,
+  notifySkippedLightingAssets,
+} from "@/utils/scene-lighting/capabilities";
 
 import { compileLighting } from "@/utils/scene-lighting/style";
 import { useUIStore } from "@/stores/modules/ui/ui";
+import { i18n } from "@/locales";
 let addBlendWarned = false;
 const sceneLightingKey: InjectionKey<ReturnType<typeof createSceneLighting>> =
   Symbol("scene-lighting");
@@ -22,7 +27,8 @@ export function useSceneLighting() {
 function createSceneLighting() {
   const game = useGameStore();
   const settings = useSettingsStore();
-  const lighting = computed(() => game.activeLighting);
+  const sourceLighting = computed(() => game.activeLighting);
+  const lighting = computed(() => lightingForPlatform(sourceLighting.value));
   const simplified = computed(() => settings.display.simplifiedLighting);
   const urls = reactive(new Map<string, string>());
   const cache = new Map<string, string>();
@@ -35,8 +41,10 @@ function createSceneLighting() {
   };
   const ui = useUIStore();
   watch(
-    [lighting, simplified],
+    [sourceLighting, simplified],
     () => {
+      // Warn from the unmodified snapshot before quality reduction hides its assets.
+      notifySkippedLightingAssets(sourceLighting.value);
       const input = normalizeLighting(lighting.value);
       if (simplified.value) {
         input.asset_layers = [];
@@ -51,8 +59,8 @@ function createSceneLighting() {
         addBlendWarned = true;
         ui.showNotification({
           type: "warning",
-          title: "光影兼容模式",
-          message: "当前窗口不支持加色混合，已降级为 screen。",
+          title: i18n.global.t("ui.lighting.compatTitle"),
+          message: i18n.global.t("ui.lighting.compatMessage"),
         });
       }
     },

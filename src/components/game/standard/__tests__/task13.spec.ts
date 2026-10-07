@@ -30,7 +30,10 @@ const stores = vi.hoisted(() => ({
   editor: null as any,
 }));
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("vue-i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock("vue-i18n", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("vue-i18n")>()),
+  useI18n: () => ({ t: (key: string) => key, te: () => false }),
+}));
 vi.mock("@/stores/modules/script-editor", () => ({ useScriptEditorStore: () => stores.editor }));
 vi.mock("@/api/services/config", () => ({
   getEnvConfigByKey: vi.fn(async () => ({ value: "false" })),

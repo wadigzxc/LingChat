@@ -221,7 +221,13 @@
             :avatar-url="previewAvatarUrl"
             :avatar-placement="previewRole"
             :live2d="!!previewRole?.live2d"
-            @warning="ui.showWarning({ title: '预览警告', message: $event, duration: 3000 })"
+            @warning="
+              ui.showWarning({
+                title: $t('ui.lighting.previewWarningTitle'),
+                message: $event,
+                duration: 3000,
+              })
+            "
             @update:lighting="updateLighting"
           />
         </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
   import { computed, ref, watch, onMounted, onScopeDispose } from "vue";
   import { useSceneEditorText } from "./useSceneEditorText";
+  import { useI18n } from "vue-i18n";
   import defaultBackground from "@/assets/images/default_bg.jpg";
   import defaultAvatar from "@/assets/images/alona.png";
   import type { LightingParams } from "@/types/scene-lighting";
@@ -13,6 +14,7 @@
     FinalLightingOverlay,
   } from "@/components/game/lighting";
   const { text } = useSceneEditorText();
+  const { t } = useI18n();
   const props = defineProps<{
     lighting: LightingParams;
     backgroundUrl?: string | null;
@@ -116,10 +118,14 @@
     releaseEvents.forEach((event) => window.removeEventListener(event, release));
     window.removeEventListener("pointermove", move);
   });
-  const renderedLighting = computed(() =>
+  const previewLighting = computed(() =>
     original.value ? { ...props.lighting, enabled: false } : props.lighting
   );
-  const { resolveAsset, warnings } = useDraftLightingAssets(renderedLighting);
+  const {
+    lighting: renderedLighting,
+    resolveAsset,
+    warnings,
+  } = useDraftLightingAssets(previewLighting);
   const warned = new Set<string>();
   function warn(message: string) {
     if (!warned.has(message)) {
@@ -138,7 +144,7 @@
               .length
         )
       )
-        warn("当前窗口不支持加色混合，已降级为 screen。");
+        warn(t("ui.lighting.compatMessage"));
     },
     { immediate: true, deep: true }
   );

@@ -1,13 +1,23 @@
 import { mount, flushPromises } from "@vue/test-utils";
 import { createI18n } from "vue-i18n";
+import settings from "@/locales/zh-CN/settings";
+import ui from "@/locales/zh-CN/ui";
 import { describe, expect, it, vi } from "vitest";
 import SceneLightingPreview from "../SceneLightingPreview.vue";
 import { createNeutralLighting } from "@/utils/scene-lighting/defaults";
 import { StaticCharacterLightingFrame, LightingOverlay } from "@/components/game/lighting";
 const assetApi = vi.hoisted(() => ({ resolve: vi.fn() }));
 vi.mock("@/api/services/scene-lighting", () => ({ resolveLightingAsset: assetApi.resolve }));
+// Real bundled i18n, without unrelated native locale-file bootstrap in this isolated preview.
+vi.mock("@/locales", async () => {
+  const { createI18n } = await import("vue-i18n");
+  const { default: messages } = await import("@/locales/zh-CN");
+  return { i18n: createI18n({ legacy: false, locale: "zh-CN", messages: { "zh-CN": messages } }) };
+});
 const global = () => ({
-  plugins: [createI18n({ legacy: false, locale: "zh", messages: { zh: {} } })],
+  plugins: [
+    createI18n({ legacy: false, locale: "zh-CN", messages: { "zh-CN": { settings, ui } } }),
+  ],
 });
 const filter = (element: Element) =>
   (element as HTMLElement).style.filter ||

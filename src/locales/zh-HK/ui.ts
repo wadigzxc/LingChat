@@ -1,5 +1,14 @@
 // 繁體中文（香港 · 粵語文體）语言包，由 zh-CN/ui.ts（约 196 条） 翻譯維護
 export default {
+  lighting: {
+    assetUnavailable: "素材無法解析或路徑不安全",
+    invalidAssetHash: "{id}: 素材 SHA-256 格式無效",
+    previewWarningTitle: "預覽警告",
+    mobileAssetsTitle: "流動裝置光影",
+    mobileAssetsMessage: "流動裝置已略過 PNG 光影素材層，參數光影仍可使用。",
+    compatTitle: "光影相容模式",
+    compatMessage: "目前視窗不支援加色混合，已降級為 screen。",
+  },
   roleExport: {
     title: "匯出角色",
     headerWithName: "{name} - 匯出",

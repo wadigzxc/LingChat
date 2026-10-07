@@ -12,6 +12,10 @@
       .join("_")}`;
     return te(key) ? t(key) : f.label;
   };
+  const optionLabel = (value: string) => {
+    const key = `settings.lighting.options.${value}`;
+    return te(key) ? t(key) : value;
+  };
   function update(f: LightingField, event: Event) {
     const input = event.target as HTMLInputElement;
     const value =
@@ -41,7 +45,9 @@
       @change="update(field, $event)"
       class="max-w-44 rounded bg-slate-800 p-1"
     >
-      <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
+      <option v-for="option in field.options" :key="option" :value="option">
+        {{ optionLabel(option) }}
+      </option>
     </select>
     <template v-else>
       <input
