@@ -351,12 +351,11 @@ fn copy_assets_content_addressed(validated: &ValidatedLingLight, assets_root: &P
         .with_context(|| format!("创建光影素材目录失败: {assets_root:?}"))?;
     for asset in &validated.assets {
         let destination: PathBuf = assets_root.join(format!("{}.png", asset.sha256));
-        let bytes = std::fs::read(&asset.staged_path)
+        let bytes = read_staged_asset(&asset.staged_path)
             .with_context(|| format!("读取已验证素材失败: {}", asset.id))?;
         if destination.exists() {
-            let existing = std::fs::read(&destination)
+            let existing_hash = hash_existing_asset(&destination)
                 .with_context(|| format!("读取既有共享素材失败: {}", asset.sha256))?;
-            let existing_hash = format!("{:x}", sha2::Sha256::digest(&existing));
             if existing_hash != asset.sha256 {
                 bail!("既有光影素材内容与其哈希文件名不一致");
             }
@@ -366,6 +365,29 @@ fn copy_assets_content_addressed(validated: &ValidatedLingLight, assets_root: &P
             .with_context(|| format!("复制光影素材失败: {}", asset.id))?;
     }
     Ok(())
+}
+
+fn read_staged_asset(path: &Path) -> Result<Vec<u8>> {
+    let limit = ArchiveLimits::default().max_png_bytes;
+    let (file, _) = super::bounded_read::open_file(path, limit)?;
+    #[cfg(test)]
+    let file = super::tests::bounded_io::observe(file, path);
+    let mut file = file;
+    let mut bytes = Vec::new();
+    super::bounded_read::read_chunks(&mut file, limit, |chunk| bytes.extend_from_slice(chunk))?;
+    Ok(bytes)
+}
+
+fn hash_existing_asset(path: &Path) -> Result<String> {
+    let (file, _) = super::bounded_read::open_file(path, ArchiveLimits::default().max_png_bytes)?;
+    #[cfg(test)]
+    let file = super::tests::bounded_io::observe(file, path);
+    let mut file = file;
+    let mut hasher = sha2::Sha256::new();
+    super::bounded_read::read_chunks(&mut file, ArchiveLimits::default().max_png_bytes, |chunk| {
+        hasher.update(chunk);
+    })?;
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 #[tauri::command]

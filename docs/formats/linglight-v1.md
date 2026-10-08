@@ -101,7 +101,7 @@ assets/<lowercase-sha256>.png
 - `mediaType` 为 `image/png`；文件扩展名 `.png`、PNG magic、解码、alpha 通道都检查。alpha 通道存在不等于强制每张图必须有非不透明像素。
 - `sha256` 是 PNG 原始文件字节的 64 位小写十六进制 digest，不是像素摘要。`bytes` 与实际长度相等，宽高与实际解码相等。
 - layer 的 id、asset_hash、media_type、required 与声明相符，层数与声明数相同，asset ID 不重复。
-- 导入只接受 `assets/` 下正规化相对路径；导出采用 hash 文件名，导入校验目前不强制原始文件名必须等于 digest。落库一律变成 `<data>/game_data/lighting_assets/<sha256>.png`，内容寻址、可复用，不接受包里的绝对地址。
+- 导入只接受 `assets/` 下正规化相对路径；同一 hash 首次导出保留 `assets/<sha256>.png`，后续共享该 PNG 的层使用 `assets/<层的一基序号>-<sha256>.png`，每层各有独立声明及 ZIP 条目，层数据不合并。导入校验目前不强制原始文件名必须等于 digest。落库一律变成 `<data>/game_data/lighting_assets/<sha256>.png`，同 hash 仍只保存一份，内容寻址、可复用，不接受包里的绝对地址。
 - 拒绝 `..`、`.`、空路径段、NUL、反斜杠、绝对路径、盘符/UNC，拒绝符号链接及特殊条目、原始重复、大小写/尾空格或点归一化冲突。公共素材声明的路径必须本来就是正规化形式。
 - 根 manifest 必须唯一；不接受额外未声明文件。ZIP central directory 和实际解压流都校验，不能靠伪造 header 绕过总大小限制。
 - 可选未知素材格式也必须验证长度和 digest。必需未知格式拒绝；可选未知格式只允许明确仅参数导入。未知 future layer 同样需要显式 required false，不是因为存在 warning 就自动忽略。
@@ -122,7 +122,7 @@ assets/<lowercase-sha256>.png
 | 单个受检查文本            | 16 KiB UTF-8 字节 |
 | metadata aliases / tags   | 各最多 64 项      |
 
-压缩比是逐项检查；拒绝损坏 ZIP/PNG、非 alpha PNG、hash/长度/尺寸不一致。测试对大限额使用可注入更小限制，证明比较与流统计边界，不声称执行过满容量性能压测。
+压缩比是逐项检查；拒绝损坏 ZIP/PNG、非 alpha PNG、hash/长度/尺寸不一致。源指纹计算和导出 CAS PNG 读取先检查已打开文件的 metadata 大小，再按实际流字节计数限制读取；读取期间增长也拒绝，最多读取上限加 1 字节探测超限，超限字节不交给 hash/素材缓冲。源指纹仍比较 canonical path、size、mtime 和完整 SHA-256。测试覆盖真实文件增长和默认限额加 1 的扩展文件拒绝；不声称执行过满容量性能压测。
 
 ## inspect、确认与 commit
 

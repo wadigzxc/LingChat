@@ -5,6 +5,7 @@ import {
   notifySkippedLightingAssets,
 } from "@/utils/scene-lighting/capabilities";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { resolvedLightingAssetPath } from "@/utils/scene-lighting/asset-path";
 import { resolveLightingAsset } from "@/api/services/scene-lighting";
 import type { LightingParams, LightingAssetLayer } from "@/types/scene-lighting";
 /** Draft-scoped resolver: no runtime stores or global resource cache. */
@@ -51,15 +52,8 @@ export function useDraftLightingAssets(lighting: Readonly<Ref<LightingParams>>) 
         });
         pending.delete(layer.asset_hash);
         if (current !== sequence) return;
-        const path = result?.asset_protocol_path;
-        if (
-          result?.hash === layer.asset_hash &&
-          result.supported &&
-          !result.warning &&
-          path &&
-          /^(?:[a-zA-Z]:[\\/]|\/(?!\/))/.test(path) &&
-          !path.split(/[\\/]/).includes("..")
-        ) {
+        const path = resolvedLightingAssetPath(result, layer.asset_hash);
+        if (path) {
           try {
             const url = convertFileSrc(path);
             cache.set(layer.asset_hash, url);

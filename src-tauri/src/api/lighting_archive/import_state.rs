@@ -24,7 +24,8 @@ impl SourceFingerprint {
     pub(crate) fn capture(path: &std::path::Path) -> Result<Self, ImportStateError> {
         let canonical_path = std::fs::canonicalize(path)
             .map_err(|error| ImportStateError::SourceUnavailable(error.to_string()))?;
-        let metadata = std::fs::metadata(&canonical_path)
+        let limit = super::ArchiveLimits::default().max_archive_bytes;
+        let (mut file, metadata) = super::bounded_read::open_file(&canonical_path, limit)
             .map_err(|error| ImportStateError::SourceUnavailable(error.to_string()))?;
         let modified_nanos = metadata
             .modified()
@@ -34,13 +35,14 @@ impl SourceFingerprint {
                 ImportStateError::SourceUnavailable("source mtime is before epoch".into())
             })?
             .as_nanos();
-        let bytes = std::fs::read(&canonical_path)
+        let mut hasher = Sha256::new();
+        super::bounded_read::read_chunks(&mut file, limit, |chunk| hasher.update(chunk))
             .map_err(|error| ImportStateError::SourceUnavailable(error.to_string()))?;
         Ok(Self {
             canonical_path,
             size: metadata.len(),
             modified_nanos,
-            sha256: format!("{:x}", Sha256::digest(bytes)),
+            sha256: format!("{:x}", hasher.finalize()),
         })
     }
 
@@ -218,6 +220,64 @@ mod tests {
         validated: ValidatedLingLight,
         fingerprint: SourceFingerprint,
         staging_path: PathBuf,
+    }
+
+    #[test]
+    fn task20_fingerprint_rejects_oversized_source_before_hashing() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("oversized.linglight");
+        std::fs::File::create(&source)
+            .unwrap()
+            .set_len(super::super::ArchiveLimits::default().max_archive_bytes + 1)
+            .unwrap();
+        let error = SourceFingerprint::capture(&source).unwrap_err();
+        assert!(error.to_string().contains("大小超出上限"), "{error}");
+    }
+
+    #[test]
+    fn task20_fingerprint_preserves_canonical_size_mtime_and_full_sha256() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("fingerprint.linglight");
+        let original = vec![7_u8; 16385];
+        std::fs::write(&source, &original).unwrap();
+        let fingerprint = SourceFingerprint::capture(&source).unwrap();
+        let metadata = std::fs::metadata(&source).unwrap();
+        assert_eq!(
+            fingerprint.canonical_path,
+            std::fs::canonicalize(&source).unwrap()
+        );
+        assert_eq!(fingerprint.size, metadata.len());
+        assert_eq!(
+            fingerprint.modified_nanos,
+            metadata
+                .modified()
+                .unwrap()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        assert_eq!(
+            fingerprint.sha256,
+            format!("{:x}", Sha256::digest(&original))
+        );
+        fingerprint.verify_unchanged().unwrap();
+        let mut changed = original;
+        changed[16384] = 9;
+        std::fs::write(&source, changed).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(metadata.modified().unwrap()))
+            .unwrap();
+        assert_eq!(
+            SourceFingerprint::capture(&source).unwrap().modified_nanos,
+            fingerprint.modified_nanos
+        );
+        assert_eq!(
+            fingerprint.verify_unchanged().unwrap_err(),
+            ImportStateError::SourceChanged
+        );
     }
 
     #[test]

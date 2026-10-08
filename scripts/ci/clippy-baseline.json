@@ -537,21 +537,21 @@
     },
     {
       "file": "src/api/lighting_archive/mod.rs",
-      "line": 17,
+      "line": 18,
       "code": "unused_imports",
       "message": "unused import: `StagedAsset`",
       "count": 2
     },
     {
       "file": "src/api/lighting_archive/tests_export.rs",
-      "line": 169,
+      "line": 339,
       "code": "clippy::redundant_closure",
       "message": "redundant closure",
       "count": 1
     },
     {
       "file": "src/api/lighting_archive/tests_export.rs",
-      "line": 406,
+      "line": 576,
       "code": "clippy::field_reassign_with_default",
       "message": "field assignment outside of initializer for an instance created with Default::default()",
       "count": 1
@@ -593,7 +593,7 @@
     },
     {
       "file": "src/api/scene.rs",
-      "line": 315,
+      "line": 366,
       "code": "clippy::redundant_closure",
       "message": "redundant closure",
       "count": 2

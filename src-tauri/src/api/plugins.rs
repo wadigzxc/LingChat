@@ -282,33 +282,89 @@ async fn sync_plugin_scripts_cmd(app: &AppHandle) {
 /// 把可见插件背景图同步为 scenes.json 中的插件场景（增删对齐）。
 async fn sync_plugin_scenes_cmd(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let entries = state
-        .data()
-        .plugin_manager
-        .visible_file_entries(ResourceKind::Backgrounds)
-        .await;
-    let data_dir = crate::api::data_dir();
-    let store = SceneStore::new(&data_dir);
-    if let Err(err) = store.mutate(|scenes| {
-        // 先移除所有旧的插件场景，再按当前可见集合重建（幂等）
-        scenes.retain(|s| s.plugin_id.is_none());
-        for e in entries {
-            scenes.push(Scene {
-                id: format!("plugin:{}/{}", e.plugin_id, e.key),
-                name: e.name.clone(),
-                description: String::new(),
-                background: e.path.to_string_lossy().into_owned(),
-                lighting: None,
-                lighting_preset_id: None,
-                lighting_preset_revision: None,
-                lighting_customized: false,
-                created_at: String::new(),
-                updated_at: String::new(),
-                plugin_id: Some(e.plugin_id.clone()),
-            });
-        }
-        Ok(())
-    }) {
-        tracing::warn!("[PluginResources] 写入插件场景失败: {err}");
+    let data = state.data();
+    let store = SceneStore::new(&crate::api::data_dir());
+    if let Err(err) = sync_plugin_scenes_with(
+        &state.ai_service,
+        &store,
+        data.plugin_manager
+            .visible_file_entries(ResourceKind::Backgrounds),
+        |id| super::scene::persist_scene_selection(app, id),
+        |payload| super::scene::emit_scene_state(app, payload),
+    )
+    .await
+    {
+        tracing::warn!("[PluginResources] 同步插件场景失败: {err}");
     }
 }
+
+// Headless seam for the same production catalog writer; callbacks are native at the command boundary.
+async fn sync_plugin_scenes_with(
+    ai_service: &tokio::sync::Mutex<crate::ai_service::service::AIService>,
+    store: &SceneStore,
+    collect: impl std::future::Future<Output = Vec<PluginResourceEntry>>,
+    persist: impl FnOnce(Option<&str>) -> Result<(), String>,
+    emit: impl FnOnce(
+        &crate::ai_service::game_system::scene_transition::SceneStatePayload,
+    ) -> Result<(), String>,
+) -> Result<(), String> {
+    // Lock order: service -> plugin records (released by collect) -> SceneStore.
+    // PluginManager never acquires the service lock while holding its records lock.
+    let service = ai_service.lock().await;
+    let entries = collect.await;
+    let scenes = store
+        .mutate(|scenes| {
+            // Keep persisted defaults/provenance for IDs that remain visible.
+            // No background cleanup: these files belong to PluginManager.
+            let previous: HashMap<_, _> = scenes
+                .iter()
+                .filter(|scene| scene.plugin_id.is_some())
+                .map(|scene| (scene.id.clone(), scene.clone()))
+                .collect();
+            scenes.retain(|scene| scene.plugin_id.is_none());
+            for e in entries {
+                let id = format!("plugin:{}/{}", e.plugin_id, e.key);
+                if let Some(existing) = previous.get(&id) {
+                    let mut retained = existing.clone();
+                    retained.name = e.name;
+                    retained.background = e.path.to_string_lossy().into_owned();
+                    scenes.push(retained);
+                    continue;
+                }
+                scenes.push(Scene {
+                    id,
+                    name: e.name.clone(),
+                    description: String::new(),
+                    background: e.path.to_string_lossy().into_owned(),
+                    lighting: None,
+                    lighting_preset_id: None,
+                    lighting_preset_revision: None,
+                    lighting_customized: false,
+                    created_at: String::new(),
+                    updated_at: String::new(),
+                    plugin_id: Some(e.plugin_id.clone()),
+                });
+            }
+            Ok(scenes.clone())
+        })
+        .map_err(|err| format!("写入插件场景失败: {err}"))?;
+    // Store has committed and released its lock. Clear only an invalid selection;
+    // a still-visible scene must retain its current temporary/manual lighting.
+    let runtime = service.game_status.lock().await.scene_runtime_state();
+    if runtime
+        .current_scene_id
+        .as_deref()
+        .is_some_and(|id| !scenes.iter().any(|scene| scene.id == id))
+    {
+        let transition =
+            crate::ai_service::game_system::scene_transition::transition_scene_selection(
+                &runtime, None,
+            )?;
+        super::scene::apply_scene_transition_with(&service, transition, persist, emit).await?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "plugins_scene_tests.rs"]
+mod scene_tests;

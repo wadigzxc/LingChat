@@ -111,7 +111,7 @@ pub fn validate_linglight(
     limits: ArchiveLimits,
 ) -> Result<ValidatedLingLight, LingLightError> {
     verify_zip_magic_and_size(archive_path, limits.max_archive_bytes)?;
-    validate_central_directory_paths(archive_path, limits.max_entries)?;
+    validate_central_directory_paths(archive_path, limits.max_entries, limits.max_archive_bytes)?;
     let staging = tempfile::tempdir()?;
     let staged_files = stage_archive(archive_path, staging.path(), limits)?;
     let manifest_path = staged_files

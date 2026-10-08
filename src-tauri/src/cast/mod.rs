@@ -409,6 +409,14 @@ fn enrich_mirror_with_runtime_lighting(
         .as_object_mut()
         .ok_or_else(|| "投屏镜像必须是 JSON 对象".to_string())?;
     object.insert(
+        "currentSceneId".into(),
+        serde_json::to_value(&runtime.current_scene_id).map_err(|error| error.to_string())?,
+    );
+    object.insert(
+        "background".into(),
+        serde_json::Value::String(runtime.background.clone()),
+    );
+    object.insert(
         "activeLighting".into(),
         serde_json::to_value(&runtime.active_lighting).map_err(|error| error.to_string())?,
     );
@@ -435,26 +443,35 @@ fn enrich_mirror_with_runtime_lighting(
     Ok(mirror)
 }
 
+async fn publish_runtime_mirror(
+    ai_service: &tokio::sync::Mutex<crate::ai_service::service::AIService>,
+    storage: &Mutex<Option<serde_json::Value>>,
+    mirror: serde_json::Value,
+    emit: impl FnOnce(serde_json::Value) -> Result<(), String>,
+) -> Result<(), String> {
+    // Keep the authoritative service guard through storage and publication.
+    let service = ai_service.lock().await;
+    let runtime = service.game_status.lock().await.scene_runtime_state();
+    let mirror = enrich_mirror_with_runtime_lighting(mirror, &runtime)?;
+    {
+        let mut stored = storage.lock().map_err(|e| format!("锁失败: {e}"))?;
+        *stored = Some(mirror.clone());
+    }
+    emit(mirror)
+}
+
 #[tauri::command]
 pub async fn cast_emit_mirror(
     app: AppHandle,
     state: State<'_, CastManager>,
     mirror: serde_json::Value,
 ) -> Result<(), String> {
-    let runtime = {
-        let app_state = app.state::<crate::AppState>();
-        let service = app_state.ai_service.lock().await;
-        let runtime = service.game_status.lock().await.scene_runtime_state();
-        runtime
-    };
-    let mirror = enrich_mirror_with_runtime_lighting(mirror, &runtime)?;
-    {
-        let mut stored = state.mirror.lock().map_err(|e| format!("锁失败: {e}"))?;
-        *stored = Some(mirror.clone());
-    }
-    app.emit("cast:mirror", mirror)
-        .map_err(|e| format!("广播投屏镜像失败: {e}"))?;
-    Ok(())
+    let app_state = app.state::<crate::AppState>();
+    publish_runtime_mirror(&app_state.ai_service, &state.mirror, mirror, |mirror| {
+        app.emit("cast:mirror", mirror)
+            .map_err(|e| format!("广播投屏镜像失败: {e}"))
+    })
+    .await
 }
 
 /// 读取最近一次投屏镜像（投屏窗口打开时播种初始状态）。
@@ -483,6 +500,196 @@ mod tests {
     use crate::ai_service::game_system::scene_transition::{
         SceneLightingSource, SceneRuntimeState,
     };
+    use std::future::Future;
+    use std::sync::Arc;
+
+    #[test]
+    fn stale_mirror_identity_is_replaced_with_the_runtime_revision_snapshot() {
+        let mut runtime = SceneRuntimeState::neutral(11);
+        runtime.current_scene_id = Some("B".into());
+        runtime.background = "new.png".into();
+        runtime.active_lighting.master_intensity = 0.4;
+        runtime.source = SceneLightingSource::SceneDefault;
+        runtime.preset_id = Some("user:new".into());
+        runtime.preset_revision = Some(3);
+        runtime.customized = true;
+        let mirror = serde_json::json!({
+            "currentSceneId": "A", "background": "old.png", "lightingRevision": 10,
+            "line": {"text": "dialog"}, "dialogWidth": 70
+        });
+        let enriched = enrich_mirror_with_runtime_lighting(mirror, &runtime).unwrap();
+        assert_eq!(enriched["currentSceneId"], "B");
+        assert_eq!(enriched["background"], "new.png");
+        assert_eq!(enriched["activeLighting"]["master_intensity"], 0.4);
+        assert_eq!(enriched["activeLightingSource"], "scene_default");
+        assert_eq!(enriched["activeLightingPresetId"], "user:new");
+        assert_eq!(enriched["activeLightingPresetRevision"], 3);
+        assert_eq!(enriched["activeLightingCustomized"], true);
+        assert_eq!(enriched["lightingRevision"], 11);
+        assert_eq!(enriched["line"]["text"], "dialog");
+        assert_eq!(enriched["dialogWidth"], 70);
+    }
+
+    #[test]
+    fn mirror_clears_stale_identity_and_replaces_id_even_for_the_same_background() {
+        for (id, background) in [(None, ""), (Some("B"), "same.png")] {
+            let mut runtime = SceneRuntimeState::neutral(11);
+            runtime.current_scene_id = id.map(str::to_string);
+            runtime.background = background.into();
+            let mirror = serde_json::json!({
+                "currentSceneId": "A", "background": "same.png", "lightingRevision": 10,
+                "activeLightingPresetId": "user:old", "activeLightingSource": "manual",
+                "activeLightingPresetRevision": 8, "activeLightingCustomized": true
+            });
+            let enriched = enrich_mirror_with_runtime_lighting(mirror, &runtime).unwrap();
+            assert_eq!(enriched["currentSceneId"], serde_json::json!(id));
+            assert_eq!(enriched["background"], background);
+            assert_eq!(
+                enriched["activeLighting"],
+                serde_json::to_value(&runtime.active_lighting).unwrap()
+            );
+            assert_eq!(enriched["activeLightingSource"], "neutral");
+            assert!(enriched["activeLightingPresetId"].is_null());
+            assert!(enriched["activeLightingPresetRevision"].is_null());
+            assert_eq!(enriched["activeLightingCustomized"], false);
+            assert_eq!(enriched["lightingRevision"], 11);
+        }
+        assert!(
+            enrich_mirror_with_runtime_lighting(
+                serde_json::json!(null),
+                &SceneRuntimeState::neutral(0)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn mirror_publication_keeps_the_service_guard_through_store_and_emit() {
+        // Supplemental command-scope assertion; no native AppHandle E2E claim.
+        let source = include_str!("mod.rs");
+        let body = source
+            .split("async fn publish_runtime_mirror(")
+            .nth(1)
+            .unwrap()
+            .split("pub async fn cast_emit_mirror(")
+            .next()
+            .unwrap();
+        let lock = body.find("let service =").unwrap();
+        let snapshot = body.find("scene_runtime_state()").unwrap();
+        let store = body.find("*stored =").unwrap();
+        let emit = body.find("emit(mirror)").unwrap();
+        assert!(lock < snapshot && snapshot < store && store < emit);
+        assert!(
+            !body[lock..emit].contains("runtime\n    };"),
+            "snapshot must not release its guard before publication"
+        );
+        assert!(!body[lock..emit].contains("drop(service)"));
+        let command = source
+            .split("pub async fn cast_emit_mirror(")
+            .nth(1)
+            .unwrap()
+            .split("/// 读取最近一次投屏镜像")
+            .next()
+            .unwrap();
+        assert!(command.contains("publish_runtime_mirror(&app_state.ai_service, &state.mirror"));
+        assert!(command.contains("app.emit(\"cast:mirror\""));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mirror_publication_serializes_actual_snapshot_storage_and_callback() {
+        let root = tempfile::tempdir().unwrap();
+        let service = Arc::new(tokio::sync::Mutex::new(
+            crate::ai_service::service::AIService::new(
+                sea_orm::DatabaseConnection::default(),
+                root.path().to_path_buf(),
+                Default::default(),
+                Default::default(),
+                None,
+                false,
+                10,
+                10,
+                Default::default(),
+                false,
+            )
+            .await,
+        ));
+        {
+            let service = service.lock().await;
+            let mut gs = service.game_status.lock().await;
+            gs.current_scene_id = Some("A".into());
+            gs.background = "same.png".into();
+            gs.lighting_revision = 10;
+        }
+        let storage = Arc::new(Mutex::new(None));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let first_service = service.clone();
+        let first_storage = storage.clone();
+        let first_events = events.clone();
+        let first_release = release.clone();
+        let first = tokio::spawn(async move {
+            publish_runtime_mirror(
+                &first_service,
+                &first_storage,
+                serde_json::json!({"currentSceneId": "stale", "background": "stale.png"}),
+                |mirror| {
+                    started_tx.send(()).unwrap();
+                    first_release.wait();
+                    assert!(
+                        first_service.try_lock().is_err(),
+                        "service guard must survive through publication callback"
+                    );
+                    first_events.lock().unwrap().push(mirror);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+        });
+        started_rx.await.unwrap();
+        let update = async {
+            let service = service.lock().await;
+            let mut gs = service.game_status.lock().await;
+            gs.current_scene_id = Some("B".into());
+            gs.active_lighting.master_intensity = 0.5;
+            gs.lighting_revision = 11;
+        };
+        tokio::pin!(update);
+        let queued = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(update.as_mut().poll(cx).is_pending())
+        })
+        .await;
+        tokio::task::spawn_blocking(move || release.wait())
+            .await
+            .unwrap();
+        first.await.unwrap();
+        assert!(
+            queued,
+            "a runtime update must wait until the older publication finishes"
+        );
+        update.await;
+        publish_runtime_mirror(
+            &service,
+            &storage,
+            serde_json::json!({"currentSceneId": "A"}),
+            |mirror| {
+                events.lock().unwrap().push(mirror);
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["currentSceneId"], "A");
+        assert_eq!(events[0]["lightingRevision"], 10);
+        assert_eq!(events[1]["currentSceneId"], "B");
+        assert_eq!(events[1]["background"], "same.png");
+        assert_eq!(events[1]["activeLighting"]["master_intensity"], 0.5);
+        assert_eq!(events[1]["lightingRevision"], 11);
+        assert_eq!(storage.lock().unwrap().as_ref().unwrap(), &events[1]);
+    }
 
     #[test]
     fn mirror_uses_authoritative_runtime_lighting_metadata() {

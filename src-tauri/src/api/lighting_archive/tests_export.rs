@@ -79,6 +79,10 @@ async fn exports_png_and_preserves_asset_hash_on_round_trip() {
     let validated = validate_linglight(&target, ArchiveLimits::default()).unwrap();
 
     assert_eq!(validated.assets.len(), 1);
+    assert_eq!(
+        validated.manifest.assets[0].path,
+        format!("assets/{hash}.png")
+    );
     assert_eq!(validated.assets[0].sha256, hash);
     assert_eq!(validated.manifest.lighting, preset.lighting);
     assert_eq!(
@@ -107,6 +111,172 @@ async fn exports_png_and_preserves_asset_hash_on_round_trip() {
     assert_eq!(imported.origin_id, preset.origin_id);
     assert_eq!(imported.aliases, preset.aliases);
     assert_eq!(imported.lighting.asset_layers[0].asset_hash, hash);
+}
+
+#[tokio::test]
+async fn task20_shared_png_layers_export_validate_inspect_commit_round_trip() {
+    let data = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let png = transparent_png();
+    let hash = format!("{:x}", Sha256::digest(&png));
+    let assets = data.path().join("game_data/lighting_assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    std::fs::write(assets.join(format!("{hash}.png")), &png).unwrap();
+    let mut lighting = LightingParams::default();
+    for (index, id) in ["mist", "rim", "overlay"].iter().enumerate() {
+        lighting.asset_layers.push(LightingAssetLayer {
+            id: (*id).into(),
+            asset_hash: hash.clone(),
+            opacity: 0.2 + index as f64 * 0.2,
+            z_index: index as i32,
+            required: index == 0,
+            ..Default::default()
+        });
+    }
+    let store = LightingPresetStore::new(data.path());
+    let preset = store
+        .create(LightingPresetDraft {
+            name: "Shared PNG".into(),
+            lighting,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let target = output.path().join("shared.linglight");
+    export_linglight_path(&preset.id, &target, &store, data.path())
+        .await
+        .unwrap();
+    let validated = validate_linglight(&target, ArchiveLimits::default()).unwrap();
+    assert_eq!(validated.assets.len(), 3);
+    assert_eq!(validated.manifest.assets.len(), 3);
+    assert_eq!(validated.manifest.lighting, preset.lighting);
+    let expected_paths = [
+        format!("assets/{hash}.png"),
+        format!("assets/2-{hash}.png"),
+        format!("assets/3-{hash}.png"),
+    ];
+    for (index, asset) in validated.manifest.assets.iter().enumerate() {
+        assert_eq!(asset.path, expected_paths[index]);
+        assert_eq!(asset.id, preset.lighting.asset_layers[index].id);
+        assert_eq!(asset.sha256, hash);
+        assert_eq!(asset.required, preset.lighting.asset_layers[index].required);
+        assert_eq!(
+            std::fs::read(&validated.assets[index].staged_path).unwrap(),
+            png
+        );
+    }
+    let zip = zip::ZipArchive::new(std::fs::File::open(&target).unwrap()).unwrap();
+    assert_eq!(zip.len(), validated.manifest.assets.len() + 1);
+    let destination = tempfile::tempdir().unwrap();
+    let destination_store = LightingPresetStore::new(destination.path());
+    let state = LingLightImportState::default();
+    let inspection = inspect_linglight_path(&target, &state, &destination_store)
+        .await
+        .unwrap();
+    assert_eq!(inspection.assets.len(), 3);
+    let imported = commit_linglight_import_inner(
+        &inspection.token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &destination_store,
+        destination.path(),
+    )
+    .await
+    .unwrap()
+    .preset;
+    assert_eq!(imported.lighting, preset.lighting);
+    assert_eq!(imported.origin_id, preset.origin_id);
+    let cas = destination.path().join("game_data/lighting_assets");
+    assert_eq!(std::fs::read_dir(&cas).unwrap().count(), 1);
+    assert_eq!(std::fs::read(cas.join(format!("{hash}.png"))).unwrap(), png);
+}
+
+#[tokio::test]
+async fn task20_export_rejects_oversized_sparse_cas_at_bounded_file_gate() {
+    let data = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let hash = "7".repeat(64);
+    let assets = data.path().join("game_data/lighting_assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    let cas_path = assets.join(format!("{hash}.png"));
+    let file = std::fs::File::create(&cas_path).unwrap();
+    #[cfg(windows)]
+    {
+        use std::ffi::c_void;
+        use std::os::windows::fs::MetadataExt;
+        use std::os::windows::io::AsRawHandle;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn DeviceIoControl(
+                handle: *mut c_void,
+                code: u32,
+                input: *mut c_void,
+                input_size: u32,
+                output: *mut c_void,
+                output_size: u32,
+                returned: *mut u32,
+                overlapped: *mut c_void,
+            ) -> i32;
+        }
+        let mut returned = 0;
+        // FSCTL_SET_SPARSE on this isolated fixture only; null input means true.
+        // SAFETY: the file handle stays live, returned is writable, and every
+        // null buffer has size zero. This synchronous call has no OVERLAPPED.
+        let result = unsafe {
+            DeviceIoControl(
+                file.as_raw_handle(),
+                0x0009_00c4,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_ne!(result, 0, "{}", std::io::Error::last_os_error());
+        assert_ne!(file.metadata().unwrap().file_attributes() & 0x200, 0);
+    }
+    file.set_len(ArchiveLimits::default().max_png_bytes + 1)
+        .unwrap();
+    drop(file);
+    let mut lighting = LightingParams::default();
+    lighting.asset_layers.push(LightingAssetLayer {
+        id: "oversized".into(),
+        asset_hash: hash,
+        ..Default::default()
+    });
+    let store = LightingPresetStore::new(data.path());
+    let preset = store
+        .create(LightingPresetDraft {
+            name: "Oversized CAS".into(),
+            lighting,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let target = output.path().join("existing.linglight");
+    std::fs::write(&target, b"old-package").unwrap();
+    let error = export_linglight_path(&preset.id, &target, &store, data.path())
+        .await
+        .unwrap_err();
+    // The bounded I/O gate must reject metadata before allocating/reading a Vec;
+    // a late bytes.len() validation is not an equivalent resource boundary.
+    assert!(
+        format!("{error:#}").contains("文件大小超出上限"),
+        "{error:#}"
+    );
+    assert_eq!(
+        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"old-package");
+    assert_eq!(std::fs::read_dir(output.path()).unwrap().count(), 1);
+    assert_eq!(
+        std::fs::metadata(cas_path).unwrap().len(),
+        ArchiveLimits::default().max_png_bytes + 1
+    );
 }
 
 #[tokio::test]

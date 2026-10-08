@@ -13,6 +13,31 @@ use zip::write::SimpleFileOptions;
 use super::{ArchiveLimits, validate_linglight};
 use crate::ai_service::game_system::lighting::LightingParams;
 
+#[path = "tests_bounded_io.rs"]
+pub(super) mod bounded_io;
+
+#[test]
+fn task20_q6_central_directory_growth_is_bounded_by_custom_archive_limit() {
+    let fixture = PackageFixture::valid();
+    let limit = std::fs::metadata(&fixture.archive).unwrap().len();
+    let probe = bounded_io::ReadProbe::new(&fixture.archive, Some(limit + 64));
+    let limits = ArchiveLimits {
+        max_archive_bytes: limit,
+        ..Default::default()
+    };
+    let result = validate_linglight(&fixture.archive, limits);
+    assert_eq!(probe.opened_size(), Some(limit));
+    assert!(
+        probe.bytes_read() <= limit + 1,
+        "read {} bytes, limit {limit}",
+        probe.bytes_read()
+    );
+    assert!(
+        matches!(result, Err(super::LingLightError::ArchiveTooLarge { limit: actual }) if actual == limit),
+        "{result:?}"
+    );
+}
+
 #[test]
 fn validates_normal_package_and_stages_png() {
     let fixture = PackageFixture::valid();

@@ -21,6 +21,86 @@ struct Fixture {
     png: Vec<u8>,
 }
 
+#[tokio::test]
+async fn task20_q7_existing_oversize_cas_rejects_before_read_and_preserves_state() {
+    let fixture = Fixture::new("Oversize CAS", "origin-cas-limit");
+    let data = tempfile::tempdir().unwrap();
+    let state = LingLightImportState::default();
+    let store = LightingPresetStore::new(data.path());
+    store
+        .create(LightingPresetDraft {
+            name: "Existing".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let json_path = data.path().join("game_data/lighting_presets.json");
+    let old_json = std::fs::read(&json_path).unwrap();
+    let hash = format!("{:x}", Sha256::digest(&fixture.png));
+    let assets = data.path().join("game_data/lighting_assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    let cas = assets.join(format!("{hash}.png"));
+    std::fs::write(&cas, &fixture.png).unwrap();
+    let limit = super::ArchiveLimits::default().max_png_bytes;
+    File::options()
+        .write(true)
+        .open(&cas)
+        .unwrap()
+        .set_len(limit + 1)
+        .unwrap();
+    let old_cas = Sha256::digest(std::fs::read(&cas).unwrap());
+    let old_metadata = std::fs::metadata(&cas).unwrap();
+    let token = inspect_linglight_path(&fixture.archive, &state, &store)
+        .await
+        .unwrap()
+        .token;
+    let probe = super::tests::bounded_io::ReadProbe::new(&cas, None);
+    let error = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(std::fs::read(&json_path).unwrap(), old_json);
+    assert_eq!(Sha256::digest(std::fs::read(&cas).unwrap()), old_cas);
+    assert_eq!(
+        std::fs::metadata(&cas).unwrap().modified().unwrap(),
+        old_metadata.modified().unwrap()
+    );
+    assert_eq!(std::fs::read_dir(&assets).unwrap().count(), 1);
+    assert_eq!(
+        store
+            .list(PresetSort::Name)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|p| p.id.starts_with("user:"))
+            .count(),
+        1
+    );
+    let retry = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(retry.to_string().contains("已被使用"), "{retry}");
+    assert_eq!(
+        probe.bytes_read(),
+        0,
+        "existing CAS must reject before reading"
+    );
+    assert!(format!("{error:#}").contains("大小超出上限"), "{error:#}");
+}
+
 impl Fixture {
     fn new(name: &str, origin: &str) -> Self {
         let temp = tempfile::tempdir().unwrap();
@@ -55,6 +135,213 @@ async fn inspect_has_no_formal_writes_and_returns_opaque_summary() {
             .unwrap()
             .contains(fixture._temp.path().to_string_lossy().as_ref())
     );
+    assert!(!data.path().join("game_data").exists());
+}
+
+#[tokio::test]
+async fn task20_q7_existing_cas_growth_stops_at_limit_plus_one_without_json_write() {
+    let fixture = Fixture::new("Growing CAS", "origin-cas-growth");
+    let data = tempfile::tempdir().unwrap();
+    let state = LingLightImportState::default();
+    let store = LightingPresetStore::new(data.path());
+    let token = inspect_linglight_path(&fixture.archive, &state, &store)
+        .await
+        .unwrap()
+        .token;
+    let hash = format!("{:x}", Sha256::digest(&fixture.png));
+    let assets = data.path().join("game_data/lighting_assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    let cas = assets.join(format!("{hash}.png"));
+    std::fs::write(&cas, &fixture.png).unwrap();
+    let unrelated = assets.join("shared.png");
+    std::fs::write(&unrelated, b"shared").unwrap();
+    let limit = super::ArchiveLimits::default().max_png_bytes;
+    let probe = super::tests::bounded_io::ReadProbe::new(&cas, Some(limit + 64));
+    let error = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(!data.path().join("game_data/lighting_presets.json").exists());
+    assert_eq!(std::fs::read(&unrelated).unwrap(), b"shared");
+    let mut expected_cas = fixture.png.clone();
+    expected_cas.resize((limit + 64) as usize, 0);
+    assert_eq!(std::fs::read(&cas).unwrap(), expected_cas);
+    assert_eq!(std::fs::read_dir(&assets).unwrap().count(), 2);
+    let retry = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(retry.to_string().contains("已被使用"), "{retry}");
+    assert_eq!(probe.opened_size(), Some(fixture.png.len() as u64));
+    assert_eq!(
+        probe.bytes_read(),
+        limit + 1,
+        "read-time growth must be bounded"
+    );
+    assert!(format!("{error:#}").contains("大小超出上限"), "{error:#}");
+}
+
+#[tokio::test]
+async fn task20_q7_staged_oversize_png_rejects_before_read_without_formal_write() {
+    let fixture = Fixture::new("Oversize staged", "origin-staged-limit");
+    let data = tempfile::tempdir().unwrap();
+    let state = LingLightImportState::default();
+    let store = LightingPresetStore::new(data.path());
+    let validated =
+        super::validate_linglight(&fixture.archive, super::ArchiveLimits::default()).unwrap();
+    let staged = validated.assets[0].staged_path.clone();
+    let fingerprint = super::import_state::SourceFingerprint::capture(&fixture.archive).unwrap();
+    let (token, _) = state.insert(validated, fingerprint).unwrap();
+    let limit = super::ArchiveLimits::default().max_png_bytes;
+    File::options()
+        .write(true)
+        .open(&staged)
+        .unwrap()
+        .set_len(limit + 1)
+        .unwrap();
+    let probe = super::tests::bounded_io::ReadProbe::new(&staged, None);
+    let error = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(!data.path().join("game_data/lighting_presets.json").exists());
+    assert_eq!(
+        std::fs::read_dir(data.path().join("game_data/lighting_assets"))
+            .unwrap()
+            .count(),
+        0
+    );
+    let retry = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(retry.to_string().contains("已被使用"), "{retry}");
+    assert_eq!(probe.bytes_read(), 0);
+    assert!(format!("{error:#}").contains("大小超出上限"), "{error:#}");
+}
+
+#[tokio::test]
+async fn task20_q7_staged_read_time_growth_is_bounded_without_formal_write() {
+    let fixture = Fixture::new("Growing staged", "origin-staged-growth");
+    let data = tempfile::tempdir().unwrap();
+    let state = LingLightImportState::default();
+    let store = LightingPresetStore::new(data.path());
+    let validated =
+        super::validate_linglight(&fixture.archive, super::ArchiveLimits::default()).unwrap();
+    let staged = validated.assets[0].staged_path.clone();
+    let fingerprint = super::import_state::SourceFingerprint::capture(&fixture.archive).unwrap();
+    let (token, _) = state.insert(validated, fingerprint).unwrap();
+    let limit = super::ArchiveLimits::default().max_png_bytes;
+    let probe = super::tests::bounded_io::ReadProbe::new(&staged, Some(limit + 64));
+    let error = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(!data.path().join("game_data/lighting_presets.json").exists());
+    assert_eq!(
+        std::fs::read_dir(data.path().join("game_data/lighting_assets"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(probe.opened_size(), Some(fixture.png.len() as u64));
+    assert_eq!(probe.bytes_read(), limit + 1);
+    let retry = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(retry.to_string().contains("已被使用"), "{retry}");
+    assert!(format!("{error:#}").contains("大小超出上限"), "{error:#}");
+}
+
+#[tokio::test]
+async fn task20_q7_exact_cap_existing_cas_reaches_hash_check_without_mutation() {
+    let fixture = Fixture::new("Exact CAS", "origin-cas-exact");
+    let data = tempfile::tempdir().unwrap();
+    let state = LingLightImportState::default();
+    let store = LightingPresetStore::new(data.path());
+    let token = inspect_linglight_path(&fixture.archive, &state, &store)
+        .await
+        .unwrap()
+        .token;
+    let assets = data.path().join("game_data/lighting_assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    let hash = format!("{:x}", Sha256::digest(&fixture.png));
+    let cas = assets.join(format!("{hash}.png"));
+    let limit = super::ArchiveLimits::default().max_png_bytes;
+    let mut bytes = fixture.png.clone();
+    bytes.resize(limit as usize, 0);
+    std::fs::write(&cas, &bytes).unwrap();
+    let probe = super::tests::bounded_io::ReadProbe::new(&cas, None);
+    let error = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("哈希文件名不一致"), "{error:#}");
+    assert_eq!(probe.bytes_read(), limit);
+    assert_eq!(std::fs::read(&cas).unwrap(), bytes);
+    assert!(!data.path().join("game_data/lighting_presets.json").exists());
+}
+
+#[tokio::test]
+async fn task20_q6_inspect_source_growth_rejects_without_formal_writes() {
+    let fixture = Fixture::new("Growing archive", "origin-archive-growth");
+    let data = tempfile::tempdir().unwrap();
+    let state = LingLightImportState::default();
+    let store = LightingPresetStore::new(data.path());
+    let original_size = std::fs::metadata(&fixture.archive).unwrap().len();
+    let limit = super::ArchiveLimits::default().max_archive_bytes;
+    let probe = super::tests::bounded_io::ReadProbe::new(&fixture.archive, Some(limit + 64));
+    let error = inspect_linglight_path(&fixture.archive, &state, &store)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error.downcast_ref::<super::LingLightError>(), Some(super::LingLightError::ArchiveTooLarge { limit: actual }) if *actual == limit)
+    );
+    assert_eq!(probe.opened_size(), Some(original_size));
+    assert_eq!(probe.bytes_read(), limit + 1);
     assert!(!data.path().join("game_data").exists());
 }
 
@@ -141,6 +428,47 @@ async fn fingerprint_change_after_inspect_is_rejected() {
     .to_string();
     assert!(error.contains("发生变化"));
     assert!(!data.path().join("game_data/lighting_presets.json").exists());
+}
+
+#[tokio::test]
+async fn task20_source_growth_after_inspect_rejects_commit_without_formal_writes() {
+    let fixture = Fixture::new("Grown", "origin-grown");
+    let data = tempfile::tempdir().unwrap();
+    let state = LingLightImportState::default();
+    let store = LightingPresetStore::new(data.path());
+    let token = inspect_linglight_path(&fixture.archive, &state, &store)
+        .await
+        .unwrap()
+        .token;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&fixture.archive)
+        .unwrap()
+        .set_len(super::ArchiveLimits::default().max_archive_bytes + 1)
+        .unwrap();
+    let error = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("大小超出上限"), "{error}");
+    assert!(!data.path().join("game_data").exists());
+    let retry = commit_linglight_import_inner(
+        &token,
+        ImportStrategy::KeepBoth,
+        false,
+        &state,
+        &store,
+        data.path(),
+    )
+    .await
+    .unwrap_err();
+    assert!(retry.to_string().contains("已被使用"), "{retry}");
 }
 
 #[tokio::test]

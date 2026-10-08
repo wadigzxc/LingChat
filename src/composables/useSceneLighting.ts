@@ -5,6 +5,7 @@ import { useGameStore } from "@/stores/modules/game";
 import { useSettingsStore } from "@/stores/modules/settings";
 import type { LightingAssetLayer } from "@/types/scene-lighting";
 import { normalizeLighting } from "@/utils/scene-lighting/normalize";
+import { resolvedLightingAssetPath } from "@/utils/scene-lighting/asset-path";
 import {
   lightingForPlatform,
   notifySkippedLightingAssets,
@@ -94,15 +95,8 @@ function createSceneLighting() {
         pending.delete(layer.asset_hash);
         if (current !== sequence) return;
         if (!result) continue;
-        const path = result.asset_protocol_path;
-        if (
-          result.hash === layer.asset_hash &&
-          result.supported &&
-          !result.warning &&
-          path &&
-          /^(?:[a-zA-Z]:[\\/]|\/(?!\/))/.test(path) &&
-          !path.split(/[\\/]/).includes("..")
-        ) {
+        const path = resolvedLightingAssetPath(result, layer.asset_hash);
+        if (path) {
           try {
             const url = convertFileSrc(path);
             cache.set(layer.asset_hash, url);

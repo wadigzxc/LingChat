@@ -146,22 +146,12 @@ impl Tool for SceneSwitch {
             ));
         }
 
-        let scenes = crate::api::scene::load_synchronized_scenes().map_err(ToolError::Execution)?;
-        let scene = match (&id, &name) {
-            (Some(i), _) => scenes.iter().find(|s| &s.id == i),
-            (_, Some(n)) => scenes.iter().find(|s| &s.name == n),
-            _ => None,
-        };
-        let Some(scene) = scene.cloned() else {
-            let what = id.or(name).unwrap_or_default();
-            return Err(ToolError::Execution(format!("未找到场景: {what}")));
-        };
-        let scene_id = scene.id.clone();
-
         let app = context.require_app()?;
-        crate::api::scene::apply_scene_selection(&app, Some(&scene))
-            .await
-            .map_err(ToolError::Execution)?;
+        let payload =
+            crate::api::scene::select_scene_by_query(&app, id.as_deref(), name.as_deref())
+                .await
+                .map_err(ToolError::Execution)?;
+        let scene_id = payload.scene.map(|scene| scene.id);
 
         Ok(json!({"ok": true, "scene_id": scene_id}))
     }

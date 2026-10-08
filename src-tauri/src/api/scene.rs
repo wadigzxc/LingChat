@@ -197,7 +197,10 @@ fn load_synchronized_scenes_from(data_dir: &Path, bg_dir: &Path) -> Result<Vec<S
         .map_err(|e| format!("同步场景列表失败: {e}"))
 }
 
-fn persist_scene_selection(app: &AppHandle, scene_id: Option<&str>) -> Result<(), String> {
+pub(crate) fn persist_scene_selection(
+    app: &AppHandle,
+    scene_id: Option<&str>,
+) -> Result<(), String> {
     let store = app
         .store(crate::config::STORE_FILE)
         .map_err(|e| format!("打开会话存储失败: {e}"))?;
@@ -213,6 +216,8 @@ pub(crate) fn emit_scene_state(app: &AppHandle, payload: &SceneStatePayload) -> 
         .map_err(|e| format!("广播场景状态失败: {e}"))
 }
 
+/// Apply only a scene resolved or saved while the caller holds the service guard.
+/// Startup/snapshot restore and default-save already own that guard: do not relock.
 pub(crate) async fn apply_scene_selection_for_service(
     app: &AppHandle,
     service: &AIService,
@@ -233,31 +238,77 @@ async fn apply_scene_transition_for_service(
     service: &AIService,
     transition: crate::ai_service::game_system::scene_transition::SceneTransition,
 ) -> Result<SceneStatePayload, String> {
-    persist_scene_selection(app, transition.current_scene_id.as_deref())?;
+    apply_scene_transition_with(
+        service,
+        transition,
+        |id| persist_scene_selection(app, id),
+        |payload| emit_scene_state(app, payload),
+    )
+    .await
+}
+
+/// Caller retains the service guard through persistence, runtime update and publication.
+/// Persistence failure leaves runtime unchanged; emit failure leaves the applied state committed.
+pub(crate) async fn apply_scene_transition_with(
+    service: &AIService,
+    transition: crate::ai_service::game_system::scene_transition::SceneTransition,
+    persist: impl FnOnce(Option<&str>) -> Result<(), String>,
+    emit: impl FnOnce(&SceneStatePayload) -> Result<(), String>,
+) -> Result<SceneStatePayload, String> {
+    persist(transition.current_scene_id.as_deref())?;
     let mut gs = service.game_status.lock().await;
     gs.apply_scene_transition(&transition);
     let payload = SceneStatePayload::from(&transition);
     drop(gs);
-    emit_scene_state(app, &payload)?;
+    emit(&payload)?;
     Ok(payload)
 }
 
-pub async fn apply_scene_selection(
+pub(crate) async fn lock_scene_query<'a>(
+    service: &'a tokio::sync::Mutex<AIService>,
+    load: impl FnOnce() -> Result<Vec<Scene>, String>,
+    id: Option<&str>,
+    name: Option<&str>,
+) -> Result<(tokio::sync::MutexGuard<'a, AIService>, Scene), String> {
+    let (guard, scenes) = lock_scene_catalog(service, load).await?;
+    let scene = match (id, name) {
+        (Some(id), _) => scenes.iter().find(|scene| scene.id == id),
+        (_, Some(name)) => scenes.iter().find(|scene| scene.name == name),
+        _ => None,
+    }
+    .cloned()
+    .ok_or_else(|| format!("未找到场景: {}", id.or(name).unwrap_or_default()))?;
+    Ok((guard, scene))
+}
+
+pub(crate) async fn select_scene_by_query(
     app: &AppHandle,
-    scene: Option<&Scene>,
+    id: Option<&str>,
+    name: Option<&str>,
 ) -> Result<SceneStatePayload, String> {
     let state = app.state::<AppState>();
-    let service = state.ai_service.lock().await;
-    apply_scene_selection_for_service(app, &service, scene).await
+    let (service, scene) =
+        lock_scene_query(&state.ai_service, load_synchronized_scenes, id, name).await?;
+    apply_scene_selection_for_service(app, &service, Some(&scene)).await
+}
+
+// Shared UI/AI selection seam. The returned guard must cover resolution,
+// persistence, runtime application and event publication.
+pub(crate) async fn lock_scene_catalog<'a>(
+    service: &'a tokio::sync::Mutex<AIService>,
+    load: impl FnOnce() -> Result<Vec<Scene>, String>,
+) -> Result<(tokio::sync::MutexGuard<'a, AIService>, Vec<Scene>), String> {
+    let guard = service.lock().await;
+    let scenes = load()?;
+    Ok((guard, scenes))
 }
 
 pub async fn select_scene_by_id(
     app: &AppHandle,
     scene_id: Option<&str>,
 ) -> Result<SceneStatePayload, String> {
-    let scenes = load_synchronized_scenes()?;
     let state = app.state::<AppState>();
-    let service = state.ai_service.lock().await;
+    let (service, scenes) = lock_scene_catalog(&state.ai_service, load_synchronized_scenes).await?;
     let runtime = service.game_status.lock().await.scene_runtime_state();
     let transition = transition_scene_by_id(&runtime, &scenes, scene_id, |scene| {
         normalize_background(&scene.background)
@@ -427,12 +478,13 @@ fn delete_scene_from_store(store: &SceneStore, id: &str, base: &Path) -> Result<
 
 #[tauri::command]
 pub async fn delete_scene(app: AppHandle, id: String) -> Result<(), String> {
+    // Match select/update: service -> store -> game status, through publication.
+    let state = app.state::<AppState>();
+    let service = state.ai_service.lock().await;
     let store = SceneStore::new(&data_dir());
     delete_scene_from_store(&store, &id, &super::backgrounds_dir())?;
 
     // 若删除的是当前选中场景，统一清空背景、光影、持久化 ID 并广播。
-    let state = app.state::<AppState>();
-    let service = state.ai_service.lock().await;
     let is_current = service.game_status.lock().await.current_scene_id.as_deref() == Some(&id);
     if is_current {
         apply_scene_selection_for_service(&app, &service, None).await?;
@@ -469,6 +521,338 @@ pub async fn set_scene_awareness(app: AppHandle, enabled: bool) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn test_service(root: &Path) -> tokio::sync::Mutex<AIService> {
+        tokio::sync::Mutex::new(
+            AIService::new(
+                sea_orm::DatabaseConnection::default(),
+                root.to_path_buf(),
+                Default::default(),
+                Default::default(),
+                None,
+                false,
+                10,
+                10,
+                Default::default(),
+                false,
+            )
+            .await,
+        )
+    }
+
+    async fn assert_queued<F: std::future::Future>(future: std::pin::Pin<&mut F>) {
+        let mut future = future;
+        std::future::poll_fn(|cx| {
+            assert!(
+                future.as_mut().poll(cx).is_pending(),
+                "operation must queue behind service guard"
+            );
+            std::task::Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn queued_ui_selection_reads_updated_scene_after_service_lock() {
+        let root = tempfile::tempdir().unwrap();
+        let bg = root.path().join("backgrounds");
+        std::fs::create_dir_all(&bg).unwrap();
+        std::fs::write(bg.join("old.png"), b"fixture").unwrap();
+        let old = load_synchronized_scenes_from(root.path(), &bg)
+            .unwrap()
+            .remove(0);
+        let store = SceneStore::new(root.path());
+        let service = test_service(root.path()).await;
+        let held = service.lock().await;
+        let initial = transition_scene_selection(
+            &crate::ai_service::game_system::scene_transition::SceneRuntimeState::neutral(20),
+            Some(SceneSelection::new(old.clone(), old.background.clone())),
+        )
+        .unwrap();
+        held.game_status
+            .lock()
+            .await
+            .apply_scene_transition(&initial);
+        let update = async {
+            let service = service.lock().await;
+            let updated = store
+                .mutate(|scenes| {
+                    scenes[0].background = "new.png".into();
+                    scenes[0].lighting = Some(LightingParams {
+                        master_intensity: 0.25,
+                        ..LightingParams::default()
+                    });
+                    scenes[0].lighting_preset_id = Some("user:new".into());
+                    scenes[0].lighting_preset_revision = Some(7);
+                    scenes[0].lighting_customized = true;
+                    Ok(scenes[0].clone())
+                })
+                .unwrap();
+            let mut gs = service.game_status.lock().await;
+            let transition = transition_scene_update_with_intent(
+                &gs.scene_runtime_state(),
+                &old,
+                updated.clone(),
+                updated.background.clone(),
+                false,
+            )
+            .unwrap()
+            .unwrap();
+            gs.apply_scene_transition(&transition);
+        };
+        tokio::pin!(update);
+        assert_queued(update.as_mut()).await;
+        let select = lock_scene_catalog(&service, || store.load_all().map_err(|e| e.to_string()));
+        tokio::pin!(select);
+        assert_queued(select.as_mut()).await;
+        drop(held);
+        update.await;
+        let (guard, scenes) = select.await.unwrap();
+        let mut gs = guard.game_status.lock().await;
+        let transition =
+            transition_scene_by_id(&gs.scene_runtime_state(), &scenes, Some(&old.id), |scene| {
+                scene.background.clone()
+            })
+            .unwrap();
+        gs.apply_scene_transition(&transition);
+        let payload = SceneStatePayload::from(&transition);
+        assert_eq!(
+            payload.background, "new.png",
+            "a higher revision must not resurrect the old Scene clone"
+        );
+        assert_eq!(payload.active_lighting.master_intensity, 0.25);
+        assert_eq!(payload.preset_id.as_deref(), Some("user:new"));
+        assert_eq!(payload.preset_revision, Some(7));
+        assert!(payload.customized);
+        assert_eq!(payload.lighting_revision, 23);
+        assert_eq!(gs.background, "new.png");
+        assert_eq!(store.load_all().unwrap()[0].background, "new.png");
+    }
+
+    #[tokio::test]
+    async fn queued_ai_name_selection_re_resolves_latest_exact_name() {
+        let root = tempfile::tempdir().unwrap();
+        let bg = root.path().join("backgrounds");
+        std::fs::create_dir_all(&bg).unwrap();
+        std::fs::write(bg.join("old.png"), b"fixture").unwrap();
+        let old = load_synchronized_scenes_from(root.path(), &bg)
+            .unwrap()
+            .remove(0);
+        let store = SceneStore::new(root.path());
+        let service = test_service(root.path()).await;
+        let held = service.lock().await;
+        let update = async {
+            let _guard = service.lock().await;
+            store
+                .mutate(|scenes| {
+                    scenes[0].name = "Renamed".into();
+                    let mut latest = scenes[0].clone();
+                    latest.id = "B".into();
+                    latest.name = old.name.clone();
+                    latest.background = "latest.png".into();
+                    latest.lighting = Some(LightingParams {
+                        master_intensity: 0.6,
+                        ..LightingParams::default()
+                    });
+                    scenes.push(latest);
+                    Ok(())
+                })
+                .unwrap();
+        };
+        tokio::pin!(update);
+        assert_queued(update.as_mut()).await;
+        let select = lock_scene_query(
+            &service,
+            || store.load_all().map_err(|e| e.to_string()),
+            None,
+            Some(&old.name),
+        );
+        tokio::pin!(select);
+        assert_queued(select.as_mut()).await;
+        drop(held);
+        update.await;
+        let (guard, scene) = select.await.unwrap();
+        let mut gs = guard.game_status.lock().await;
+        let transition = transition_scene_selection(
+            &gs.scene_runtime_state(),
+            Some(SceneSelection::new(scene.clone(), scene.background.clone())),
+        )
+        .unwrap();
+        gs.apply_scene_transition(&transition);
+        assert_eq!(
+            gs.current_scene_id.as_deref(),
+            Some("B"),
+            "AI must resolve the original name against the locked latest catalog, not pin its old ID"
+        );
+        assert_eq!(gs.background, "latest.png");
+        assert_eq!(gs.active_lighting.master_intensity, 0.6);
+    }
+
+    #[tokio::test]
+    async fn queued_selection_does_not_resurrect_deleted_scene() {
+        let root = tempfile::tempdir().unwrap();
+        let bg = root.path().join("backgrounds");
+        std::fs::create_dir_all(&bg).unwrap();
+        std::fs::write(bg.join("old.png"), b"fixture").unwrap();
+        let old = load_synchronized_scenes_from(root.path(), &bg)
+            .unwrap()
+            .remove(0);
+        let store = SceneStore::new(root.path());
+        let service = test_service(root.path()).await;
+        let held = service.lock().await;
+        let ui = lock_scene_catalog(&service, || load_synchronized_scenes_from(root.path(), &bg));
+        tokio::pin!(ui);
+        assert_queued(ui.as_mut()).await;
+        delete_scene_from_store(&store, &old.id, &bg).unwrap();
+        let mut gs = held.game_status.lock().await;
+        let clear = transition_scene_selection(&gs.scene_runtime_state(), None).unwrap();
+        gs.apply_scene_transition(&clear);
+        drop(gs);
+        drop(held);
+        let (guard, scenes) = ui.await.unwrap();
+        let gs = guard.game_status.lock().await;
+        assert!(
+            transition_scene_by_id(&gs.scene_runtime_state(), &scenes, Some(&old.id), |scene| {
+                scene.background.clone()
+            })
+            .is_err()
+        );
+        assert_eq!(gs.current_scene_id, None);
+        assert_eq!(gs.lighting_revision, 1);
+        drop(gs);
+        drop(guard);
+        let ai = lock_scene_query(
+            &service,
+            || store.load_all().map_err(|e| e.to_string()),
+            Some(&old.id),
+            Some(&old.name),
+        )
+        .await;
+        assert!(matches!(ai, Err(error) if error == format!("未找到场景: {}", old.id)));
+        assert!(!bg.join("old.png").exists());
+    }
+
+    #[tokio::test]
+    async fn ai_scene_query_preserves_exact_id_priority_and_case_sensitive_first_name() {
+        let root = tempfile::tempdir().unwrap();
+        let bg = root.path().join("backgrounds");
+        std::fs::create_dir_all(&bg).unwrap();
+        std::fs::write(bg.join("old.png"), b"fixture").unwrap();
+        let mut a = load_synchronized_scenes_from(root.path(), &bg)
+            .unwrap()
+            .remove(0);
+        a.id = "A".into();
+        a.name = "Exact Name".into();
+        let mut b = a.clone();
+        b.id = "B".into();
+        b.background = "latest.png".into();
+        let store = SceneStore::new(root.path());
+        store
+            .mutate(|scenes| {
+                *scenes = vec![a, b];
+                Ok(())
+            })
+            .unwrap();
+        let service = test_service(root.path()).await;
+        for (id, name, expected) in [
+            (Some("B"), Some("Exact Name"), "B"),
+            (None, Some("Exact Name"), "A"),
+        ] {
+            let (guard, scene) = lock_scene_query(
+                &service,
+                || store.load_all().map_err(|e| e.to_string()),
+                id,
+                name,
+            )
+            .await
+            .unwrap();
+            assert_eq!(scene.id, expected);
+            assert!(
+                service.try_lock().is_err(),
+                "resolution returns the same retained service guard"
+            );
+            drop(guard);
+        }
+        for (id, name, missing) in [
+            (Some("missing"), Some("Exact Name"), "missing"),
+            (None, Some("exact name"), "exact name"),
+        ] {
+            let result = lock_scene_query(
+                &service,
+                || store.load_all().map_err(|e| e.to_string()),
+                id,
+                name,
+            )
+            .await;
+            assert!(matches!(result, Err(error) if error == format!("未找到场景: {missing}")));
+        }
+    }
+
+    #[test]
+    fn selection_commands_retain_shared_guard_and_restore_does_not_relock_service() {
+        let source = include_str!("scene.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let ui = source
+            .split("pub async fn select_scene_by_id(")
+            .nth(1)
+            .unwrap()
+            .split("pub(crate) async fn restore_startup_scene_selection(")
+            .next()
+            .unwrap();
+        assert!(ui.contains("lock_scene_catalog(&state.ai_service"));
+        assert!(ui.contains("apply_scene_transition_for_service(app, &service"));
+        assert!(!ui.contains("drop(service)"));
+        let ai = source
+            .split("pub(crate) async fn select_scene_by_query(")
+            .nth(1)
+            .unwrap()
+            .split("// Shared UI/AI selection seam")
+            .next()
+            .unwrap();
+        assert!(ai.contains("lock_scene_query(&state.ai_service"));
+        assert!(ai.contains("apply_scene_selection_for_service(app, &service"));
+        assert!(!ai.contains("drop(service)"));
+        let restore = source
+            .split("pub(crate) async fn restore_startup_scene_selection(")
+            .nth(1)
+            .unwrap()
+            .split("// ========== Tauri commands")
+            .next()
+            .unwrap();
+        assert!(!restore.contains("ai_service.lock()"));
+        assert!(!source.contains("pub async fn apply_scene_selection("));
+        let tool = include_str!("../ai_service/tools/scene.rs")
+            .split("impl Tool for SceneSwitch {")
+            .nth(1)
+            .unwrap()
+            .split("pub struct LightingList;")
+            .next()
+            .unwrap();
+        assert!(tool.contains("select_scene_by_query(&app, id.as_deref(), name.as_deref())"));
+        assert!(!tool.contains("load_synchronized_scenes()"));
+    }
+
+    #[test]
+    fn scene_delete_serializes_store_cleanup_and_clear_event_under_service_lock() {
+        let source = include_str!("scene.rs");
+        let body = source
+            .split("pub async fn delete_scene(")
+            .nth(1)
+            .unwrap()
+            .split("pub async fn select_scene(")
+            .next()
+            .unwrap();
+        let lock = body.find("state.ai_service.lock().await").unwrap();
+        let deletion = body.find("delete_scene_from_store(").unwrap();
+        let clear = body.find("apply_scene_selection_for_service(").unwrap();
+        assert!(
+            lock < deletion && deletion < clear,
+            "delete persistence must not overtake a locked selection/event"
+        );
+        assert!(!body[lock..clear].contains("drop(service)"));
+    }
 
     #[test]
     fn scene_update_serializes_store_write_runtime_snapshot_and_emit_under_service_lock() {

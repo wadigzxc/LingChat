@@ -34,8 +34,27 @@ pub(crate) fn verify_zip_magic_and_size(
 pub(crate) fn validate_central_directory_paths(
     path: &Path,
     max_entries: usize,
+    max_archive_bytes: u64,
 ) -> Result<(), LingLightError> {
-    let bytes = std::fs::read(path)?;
+    let map_read_error = |error: std::io::Error| {
+        if error.kind() == std::io::ErrorKind::InvalidData {
+            LingLightError::ArchiveTooLarge {
+                limit: max_archive_bytes,
+            }
+        } else {
+            LingLightError::Io(error)
+        }
+    };
+    let (file, _) =
+        super::bounded_read::open_file(path, max_archive_bytes).map_err(map_read_error)?;
+    #[cfg(test)]
+    let file = super::tests::bounded_io::observe(file, path);
+    let mut file = file;
+    let mut bytes = Vec::new();
+    super::bounded_read::read_chunks(&mut file, max_archive_bytes, |chunk| {
+        bytes.extend_from_slice(chunk);
+    })
+    .map_err(map_read_error)?;
     let eocd = bytes
         .windows(4)
         .rposition(|window| window == b"PK\x05\x06")

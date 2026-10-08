@@ -201,7 +201,8 @@ struct PreparedAsset {
 fn prepare_assets(preset: &LightingPreset, data_dir: &Path) -> Result<Vec<PreparedAsset>> {
     let limits = ArchiveLimits::default();
     let mut prepared = Vec::with_capacity(preset.lighting.asset_layers.len());
-    for layer in &preset.lighting.asset_layers {
+    let mut used_hashes = std::collections::HashSet::new();
+    for (index, layer) in preset.lighting.asset_layers.iter().enumerate() {
         if layer.asset_hash.len() != 64
             || !layer
                 .asset_hash
@@ -216,11 +217,13 @@ fn prepare_assets(preset: &LightingPreset, data_dir: &Path) -> Result<Vec<Prepar
         let source = data_dir
             .join("game_data/lighting_assets")
             .join(format!("{}.png", layer.asset_hash));
-        let bytes = std::fs::read(&source)
+        let (mut file, _) = super::bounded_read::open_file(&source, limits.max_png_bytes)
             .with_context(|| format!("读取光影素材失败: {}", layer.asset_hash))?;
-        if bytes.len() as u64 > limits.max_png_bytes {
-            bail!("光影素材过大: {}", layer.id);
-        }
+        let mut bytes = Vec::new();
+        super::bounded_read::read_chunks(&mut file, limits.max_png_bytes, |chunk| {
+            bytes.extend_from_slice(chunk);
+        })
+        .with_context(|| format!("读取光影素材失败: {}", layer.asset_hash))?;
         let actual_hash = format!("{:x}", Sha256::digest(&bytes));
         if actual_hash != layer.asset_hash {
             bail!("光影素材哈希与预设引用不一致: {}", layer.id);
@@ -241,7 +244,12 @@ fn prepare_assets(preset: &LightingPreset, data_dir: &Path) -> Result<Vec<Prepar
         if !decoded.color().has_alpha() {
             bail!("光影素材必须包含透明通道: {}", layer.id);
         }
-        let path = format!("assets/{actual_hash}.png");
+        // Preserve one ZIP entry per layer while CAS identity remains the hash.
+        let path = if used_hashes.insert(actual_hash.clone()) {
+            format!("assets/{actual_hash}.png")
+        } else {
+            format!("assets/{}-{actual_hash}.png", index + 1)
+        };
         prepared.push(PreparedAsset {
             manifest: ManifestAsset {
                 id: layer.id.clone(),
