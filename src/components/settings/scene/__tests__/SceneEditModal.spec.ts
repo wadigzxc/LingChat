@@ -345,6 +345,85 @@ describe("scene editor draft", () => {
     expect(w.get('[aria-label="总强度"]').element).toHaveProperty("value", "0.5");
     expect(w.find('[role="alertdialog"]').exists()).toBe(true);
   });
+  it("falls back to the same role's normal artwork when the post-chat emotion has no image", async () => {
+    roleFixture.currentInteractRoleId = 1;
+    roleFixture.gameRoles[1] = {
+      character_folder: "BenchmarkStatic",
+      emotion: "担心",
+      clothesName: "default",
+      offsetX: 12,
+      offsetY: 20,
+      scale: 0.9,
+    };
+    const before = JSON.stringify(roleFixture.gameRoles);
+    invokeMock.mockClear();
+    invokeMock.mockImplementation(async (command: string, args: any) => {
+      if (command !== "get_avatar_file") throw new Error("unexpected command");
+      if (args.emotion === "担心") throw new Error("missing emotion image");
+      return "C:/BenchmarkStatic/avatar/正常.webp";
+    });
+    const w = await open();
+    expect(w.find("[data-preview-avatar]").exists()).toBe(true);
+    expect(w.get("[data-preview-avatar]").attributes("src")).toContain(
+      encodeURIComponent("C:/BenchmarkStatic/avatar/正常.webp")
+    );
+    expect(invokeMock.mock.calls).toEqual([
+      [
+        "get_avatar_file",
+        { characterFolder: "BenchmarkStatic", emotion: "担心", clothesName: "default" },
+      ],
+      [
+        "get_avatar_file",
+        { characterFolder: "BenchmarkStatic", emotion: "正常", clothesName: "default" },
+      ],
+    ]);
+    expect(JSON.stringify(roleFixture.gameRoles)).toBe(before);
+    expect(w.emitted("submit")).toBeUndefined();
+  });
+  it("keeps the preview empty when both the emotion and normal artwork are missing", async () => {
+    roleFixture.currentInteractRoleId = 1;
+    roleFixture.gameRoles[1] = { character_folder: "Alice", emotion: "担心", clothesName: "礼服" };
+    invokeMock.mockClear();
+    invokeMock.mockRejectedValue(new Error("missing artwork"));
+    const w = await open();
+    expect(w.find("[data-preview-avatar]").exists()).toBe(false);
+    expect(w.find('img[src*="alona"]').exists()).toBe(false);
+    expect(invokeMock.mock.calls).toEqual([
+      ["get_avatar_file", { characterFolder: "Alice", emotion: "担心", clothesName: "礼服" }],
+      ["get_avatar_file", { characterFolder: "Alice", emotion: "正常", clothesName: "礼服" }],
+    ]);
+  });
+  it("does not retry normal artwork twice when that is already the requested emotion", async () => {
+    roleFixture.currentInteractRoleId = 1;
+    roleFixture.gameRoles[1] = { character_folder: "Alice", emotion: "正常", clothesName: "默认" };
+    invokeMock.mockClear();
+    invokeMock.mockRejectedValue(new Error("missing normal artwork"));
+    const w = await open();
+    expect(w.find("[data-preview-avatar]").exists()).toBe(false);
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+  });
+  it("ignores an old normal fallback completion after a newer scene avatar has resolved", async () => {
+    roleFixture.currentInteractRoleId = 1;
+    roleFixture.gameRoles[1] = { character_folder: "Alice", emotion: "担心", clothesName: "默认" };
+    let old!: (path: string) => void;
+    invokeMock.mockRejectedValueOnce(new Error("missing emotion"));
+    invokeMock.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          old = resolve;
+        })
+    );
+    const w = await open();
+    invokeMock.mockResolvedValue("C:/new-avatar.png");
+    await w.setProps({ initialData: { ...initial(), sceneName: "New" } });
+    await flushPromises();
+    old("C:/stale-normal.png");
+    await flushPromises();
+    expect(w.get("[data-preview-avatar]").attributes("src")).toContain(
+      encodeURIComponent("C:/new-avatar.png")
+    );
+    expect(w.find('img[src*="stale-normal"]').exists()).toBe(false);
+  });
   it("previews the real static role resolved through existing avatar IPC including role placement", async () => {
     roleFixture.currentInteractRoleId = 1;
     roleFixture.gameRoles[1] = {

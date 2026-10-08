@@ -3,7 +3,7 @@
   import { useSceneEditorText } from "./useSceneEditorText";
   import { useI18n } from "vue-i18n";
   import defaultBackground from "@/assets/images/default_bg.jpg";
-  import defaultAvatar from "@/assets/images/alona.png";
+
   import type { LightingParams } from "@/types/scene-lighting";
   import { compileLighting } from "@/utils/scene-lighting/style";
   import { useDraftLightingAssets } from "./useDraftLightingAssets";
@@ -93,8 +93,9 @@
   const backgroundSrc = computed(() =>
     !props.backgroundUrl || backgroundFailed.value ? defaultBackground : props.backgroundUrl
   );
+  // 缺少真实立绘时只预览场景，不能把测试插画误当成当前角色。
   const avatarSrc = computed(() =>
-    !props.avatarUrl || avatarFailed.value ? defaultAvatar : props.avatarUrl
+    !props.avatarUrl || avatarFailed.value ? null : props.avatarUrl
   );
   watch(
     avatarSrc,
@@ -209,6 +210,7 @@
         style="z-index: 1"
       />
       <StaticCharacterLightingFrame
+        v-if="avatarSrc"
         :live2d="live2d"
         :live2d-ready="false"
         :fallback-visible="avatarLoaded"

@@ -23,6 +23,26 @@ const filter = (element: Element) =>
   (element as HTMLElement).style.filter ||
   (element as HTMLElement).style.getPropertyValue("-webkit-filter");
 describe("shared draft preview", () => {
+  it("keeps an uninitialized character preview empty instead of inserting unrelated sample artwork", () => {
+    const lighting = createNeutralLighting();
+    lighting.enabled = true;
+    lighting.character.brightness = 1.4;
+    lighting.main_light = {
+      ...lighting.main_light,
+      enabled: true,
+      opacity: 0.5,
+      target: "character",
+    };
+    const w = mount(SceneLightingPreview, {
+      props: { lighting, backgroundUrl: "room.png", avatarUrl: null },
+      global: global(),
+    });
+    expect(w.get("[data-preview-background]").attributes("src")).toBe("room.png");
+    expect(w.find("[data-preview-avatar]").exists()).toBe(false);
+    expect(w.find('img[src*="alona"]').exists()).toBe(false);
+    expect(w.find("[data-lighting-frame]").exists()).toBe(false);
+    expect(w.find('[data-lighting-effect="main"]').exists()).toBe(false);
+  });
   it("uses lighting fallback translations for preview controls and artwork descriptions", () => {
     const language = createI18n({
       legacy: false,
@@ -44,7 +64,7 @@ describe("shared draft preview", () => {
     const l = createNeutralLighting();
     l.main_light.shape = "linear";
     const w = mount(SceneLightingPreview, {
-      props: { lighting: l },
+      props: { lighting: l, avatarUrl: "role.png" },
       global: { plugins: [language] },
     });
     expect(w.get("[data-view-original]").text()).toBe("Hold original");
@@ -59,7 +79,10 @@ describe("shared draft preview", () => {
     const l = createNeutralLighting();
     l.enabled = true;
     l.character.brightness = 1.4;
-    const w = mount(SceneLightingPreview, { props: { lighting: l }, global: global() });
+    const w = mount(SceneLightingPreview, {
+      props: { lighting: l, avatarUrl: "role.png" },
+      global: global(),
+    });
     const button = w.get("[data-view-original]");
     await button.trigger("keydown", { key: " " });
     expect(filter(w.get("[data-lighting-visual]").element)).toBe("none");
@@ -242,7 +265,8 @@ describe("shared draft preview", () => {
     expect(frame.props("fallbackVisible")).toBe(true);
     expect(filter(w.get("[data-lighting-visual]").element)).toBe("brightness(1.4)");
     await w.setProps({ avatarUrl: null });
-    expect(frame.props("fallbackVisible")).toBe(false);
+    expect(w.findComponent(StaticCharacterLightingFrame).exists()).toBe(false);
+    expect(w.find("[data-preview-avatar]").exists()).toBe(false);
     expect(w.find("canvas").exists()).toBe(false);
   });
   it("drags linear light direction and stops editing on pointer cancellation", async () => {
@@ -306,7 +330,10 @@ describe("shared draft preview", () => {
     const l = createNeutralLighting();
     l.enabled = true;
     l.character.brightness = 1.4;
-    const w = mount(SceneLightingPreview, { props: { lighting: l }, global: global() });
+    const w = mount(SceneLightingPreview, {
+      props: { lighting: l, avatarUrl: "role.png" },
+      global: global(),
+    });
     for (const event of ["pointercancel", "blur", "pointerup"]) {
       await w.get("[data-view-original]").trigger("pointerdown", { pointerId: 1 });
       window.dispatchEvent(new Event(event));
@@ -319,14 +346,17 @@ describe("shared draft preview", () => {
     l.enabled = true;
     l.character.brightness = 1.4;
     const before = JSON.stringify(l);
-    const w = mount(SceneLightingPreview, { props: { lighting: l }, global: global() });
+    const w = mount(SceneLightingPreview, {
+      props: { lighting: l, avatarUrl: "role.png" },
+      global: global(),
+    });
     await w.get("[data-view-original]").trigger("pointerdown", { pointerId: 1 });
     expect(filter(w.get("[data-lighting-visual]").element)).toBe("none");
     expect(JSON.stringify(l)).toBe(before);
     await w.get("[data-view-original]").trigger("pointerup", { pointerId: 1 });
     expect(filter(w.get("[data-lighting-visual]").element)).toBe("brightness(1.4)");
   });
-  it("shows built-in test images on missing or failed resources and clears old cached image nodes", async () => {
+  it("keeps the default backdrop but clears missing or failed character artwork without a sample replacement", async () => {
     const w = mount(SceneLightingPreview, {
       props: {
         lighting: createNeutralLighting(),
@@ -340,13 +370,17 @@ describe("shared draft preview", () => {
     Object.defineProperty(old, "naturalWidth", { configurable: true, value: 400 });
     await w.get("[data-preview-avatar]").trigger("load");
     await w.setProps({ avatarUrl: null, backgroundUrl: null });
-    expect(w.get("[data-preview-avatar]").attributes("src")).toContain("alona.png");
+    expect(w.find("[data-preview-avatar]").exists()).toBe(false);
     expect(w.get("[data-preview-background]").attributes("src")).toContain("default_bg.jpg");
-    expect(w.get("[data-preview-avatar]").element).not.toBe(old);
+    expect(w.find("[data-lighting-frame]").exists()).toBe(false);
     expect(w.find('img[src="cached-role.png"]').exists()).toBe(false);
     await w.setProps({ avatarUrl: "missing-role.png" });
     await w.get("[data-preview-avatar]").trigger("error");
-    expect(w.get("[data-preview-avatar]").attributes("src")).toContain("alona.png");
+    expect(w.find("[data-preview-avatar]").exists()).toBe(false);
+    expect(w.find('img[src*="alona"]').exists()).toBe(false);
+    await w.setProps({ avatarUrl: "recovered-role.png" });
+    expect(w.get("[data-preview-avatar]").attributes("src")).toBe("recovered-role.png");
+    expect(w.get("[data-preview-avatar]").element).not.toBe(old);
   });
   it("renders the selected background and static role using the shared layers exactly once for both", () => {
     const l = createNeutralLighting();

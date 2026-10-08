@@ -296,13 +296,21 @@
     if (!roleId) return;
     const role = gameStore.gameRoles[roleId];
     if (!role) return;
+    const emotion = EMOTION_CONFIG_EMO[role.emotion] || "正常";
+    const request = {
+      characterFolder: role.character_folder,
+      clothesName: role.clothesName === "默认" || !role.clothesName ? "default" : role.clothesName,
+    };
     try {
-      const path: string = await invoke("get_avatar_file", {
-        characterFolder: role.character_folder,
-        emotion: EMOTION_CONFIG_EMO[role.emotion] || "正常",
-        clothesName:
-          role.clothesName === "默认" || !role.clothesName ? "default" : role.clothesName,
-      });
+      let path: string;
+      try {
+        path = await invoke<string>("get_avatar_file", { ...request, emotion });
+      } catch (error) {
+        if (sequence !== avatarSequence) return;
+        if (emotion === "正常") throw error;
+        // 对话可能切到没有配图的表情；只回退同一角色、同一服装的正常立绘。
+        path = await invoke<string>("get_avatar_file", { ...request, emotion: "正常" });
+      }
       if (sequence === avatarSequence) previewAvatarUrl.value = convertFileSrc(path);
     } catch {
       if (sequence === avatarSequence) previewAvatarUrl.value = "";
