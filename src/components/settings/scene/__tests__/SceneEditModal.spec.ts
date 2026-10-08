@@ -682,6 +682,30 @@ describe("scene editor draft", () => {
     ])
       expect(w.find(`[aria-label="${label}"]`).exists()).toBe(true);
   });
+  it("keeps a pending preset confirmation outside the independently scrolling form", async () => {
+    const saved = preset({ id: "user:saved", revision: 3 });
+    const next = preset({ id: "user:next", revision: 4 });
+    api.list.mockResolvedValue([saved, next]);
+    const source = {
+      ...initial(saved.lighting),
+      lighting_preset_id: saved.id,
+      lighting_preset_revision: saved.revision,
+    };
+    const original = JSON.stringify(source);
+    const w = await open(source);
+    await w.get('[aria-label="总强度"]').setValue(0.5);
+    await w.get('[data-preset="user:next"]').trigger("click");
+    const confirmation = w.get('[role="alertdialog"]');
+    expect(confirmation.element.closest(".overflow-y-auto")).toBeNull();
+    expect(w.get("[data-editor-fields]").attributes("disabled")).toBeDefined();
+    await w.get("[data-draft-cancel]").trigger("click");
+    await w.get('button[aria-label="关闭"]').trigger("click");
+    await w.get("[data-draft-discard]").trigger("click");
+    expect(w.emitted("close")).toHaveLength(1);
+    expect(JSON.stringify(source)).toBe(original);
+    expect(api.apply).not.toHaveBeenCalled();
+    w.unmount();
+  });
   it("guards changing presets on a dirty draft with discard and cancel", async () => {
     const p = preset();
     api.list.mockResolvedValue([p]);
@@ -709,6 +733,49 @@ describe("scene editor draft", () => {
       lighting: p.lighting,
       lighting_preset_id: p.id,
     });
+  });
+  it("keeps system-neutral reset accessible and resets only the lighting draft", async () => {
+    const p = preset({ revision: 8 });
+    p.lighting.enabled = true;
+    p.lighting.character.brightness = 1.6;
+    api.list.mockResolvedValue([p]);
+    const source = {
+      ...initial(p.lighting),
+      sceneImage: "C:/room.png",
+      lighting_preset_id: p.id,
+      lighting_preset_revision: p.revision,
+    };
+    const original = JSON.stringify(source);
+    const w = await open(source, {
+      backgrounds: [
+        { title: "Room", url: "C:/room.png" },
+        { title: "New", url: "C:/new.png" },
+      ],
+    });
+    await w.get('[aria-label="场景名称"]').setValue("Renamed room");
+    await w.get('[aria-label="场景描述"]').setValue("Keep the description");
+    await w.get('[aria-label="场景图片"]').setValue("C:/new.png");
+    const reset = w.get("[data-restore-neutral]");
+    expect(reset.element.closest(".overflow-y-auto")).toBeNull();
+    await reset.trigger("click");
+    expect(w.emitted("submit")).toBeUndefined();
+    expect(api.apply).not.toHaveBeenCalled();
+    expect(JSON.stringify(source)).toBe(original);
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "settings.sceneEdit.button.update")!
+      .trigger("click");
+    expect(w.emitted("submit")?.[0]?.[0]).toMatchObject({
+      sceneName: "Renamed room",
+      sceneDescription: "Keep the description",
+      sceneImage: "C:/new.png",
+      lighting: createNeutralLighting(),
+      lighting_preset_id: null,
+      lighting_preset_revision: null,
+      lighting_customized: false,
+    });
+    expect(JSON.stringify(source)).toBe(original);
+    w.unmount();
   });
   it("restores the latest source preset separately from system neutral", async () => {
     const p = preset({ revision: 8 });

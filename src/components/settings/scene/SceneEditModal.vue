@@ -147,36 +147,12 @@
                 >
                   {{ text("restorePreset", "恢复当前预设值") }}
                 </button>
-                <button data-restore-neutral @click="restoreNeutral">
-                  {{ text("restoreNeutral", "恢复系统中性值") }}
-                </button>
+
                 <OverallPanel :model-value="lighting" @update:model-value="updateLighting" />
                 <CharacterPanel :model-value="lighting" @update:model-value="updateLighting" />
                 <ScenePanel :model-value="lighting" @update:model-value="updateLighting" />
                 <AssetLayersPanel :model-value="lighting" @update:model-value="updateLighting" />
               </fieldset>
-              <div
-                v-if="pendingAction"
-                role="alertdialog"
-                :aria-label="text('unsavedDraft', '未保存的草稿')"
-                class="rounded bg-slate-800 p-3 text-white"
-              >
-                {{ text("unsavedDraft", "未保存的草稿") }}
-                <p v-if="saveError" role="status">{{ saveError }}</p>
-                <button
-                  data-draft-save
-                  :disabled="saving || !draft.sceneName.trim()"
-                  @click="handleSubmit"
-                >
-                  {{ text("save", "保存") }}
-                </button>
-                <button :disabled="saving" data-draft-discard @click="discard">
-                  {{ text("discard", "放弃") }}
-                </button>
-                <button :disabled="saving" data-draft-cancel @click="pendingAction = null">
-                  {{ text("cancel", "取消") }}
-                </button>
-              </div>
             </div>
             <p
               v-if="saveError"
@@ -187,30 +163,77 @@
               {{ saveError }}
             </p>
             <!-- Footer -->
-            <div
-              class="flex shrink-0 items-center justify-end gap-2 border-t border-white/10
-                bg-white/5 p-3"
-            >
-              <Button
-                @click="requestClose"
-                class="border border-white/20 bg-transparent! text-sm! text-white/70!
-                  hover:bg-white/10! hover:text-white!"
+            <div class="flex shrink-0 flex-col gap-3 border-t border-white/10 bg-white/5 p-3">
+              <div
+                v-if="pendingAction"
+                role="alertdialog"
+                :aria-label="text('unsavedDraft', '未保存的草稿')"
+                class="rounded-xl border border-amber-300/30 bg-slate-800 p-3 text-white"
               >
-                {{ $t("settings.sceneEdit.button.cancel") }}
-              </Button>
-              <Button
-                @click="handleSubmit"
-                :disabled="saving || !!pendingAction || !draft.sceneName.trim()"
-                class="min-w-[70px] border-none bg-indigo-500! text-sm! text-white
-                  shadow-[0_0_10px_rgba(99,102,241,0.5)] hover:bg-indigo-400! disabled:opacity-50
-                  disabled:shadow-none"
-              >
-                {{
-                  mode === "create"
-                    ? $t("settings.sceneEdit.button.create")
-                    : $t("settings.sceneEdit.button.update")
-                }}
-              </Button>
+                <p class="font-medium">{{ text("unsavedDraft", "未保存的草稿") }}</p>
+                <p v-if="saveError" role="status">{{ saveError }}</p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button
+                    data-draft-save
+                    :disabled="saving || !draft.sceneName.trim()"
+                    @click="handleSubmit"
+                    class="rounded-lg bg-indigo-500 px-3 py-2 disabled:opacity-50"
+                  >
+                    {{ text("save", "保存") }}
+                  </button>
+                  <button
+                    :disabled="saving"
+                    data-draft-discard
+                    @click="discard"
+                    class="rounded-lg border border-white/20 px-3 py-2 disabled:opacity-50"
+                  >
+                    {{ text("discard", "放弃") }}
+                  </button>
+                  <button
+                    :disabled="saving"
+                    data-draft-cancel
+                    @click="pendingAction = null"
+                    class="rounded-lg border border-white/20 px-3 py-2 disabled:opacity-50"
+                  >
+                    {{ text("cancel", "取消") }}
+                  </button>
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <button
+                  data-restore-neutral
+                  type="button"
+                  :disabled="saving || !!pendingAction"
+                  @click="restoreNeutral"
+                  class="rounded-lg border border-white/20 px-3 py-2 text-sm text-white/80
+                    hover:bg-white/10 disabled:opacity-50"
+                >
+                  {{ text("restoreNeutral", "恢复系统中性值") }}
+                </button>
+                <div class="flex items-center gap-2">
+                  <Button
+                    @click="requestClose"
+                    :disabled="saving || !!pendingAction"
+                    class="border border-white/20 bg-transparent! text-sm! text-white/70!
+                      hover:bg-white/10! hover:text-white!"
+                  >
+                    {{ $t("settings.sceneEdit.button.cancel") }}
+                  </Button>
+                  <Button
+                    @click="handleSubmit"
+                    :disabled="saving || !!pendingAction || !draft.sceneName.trim()"
+                    class="min-w-[70px] border-none bg-indigo-500! text-sm! text-white
+                      shadow-[0_0_10px_rgba(99,102,241,0.5)] hover:bg-indigo-400!
+                      disabled:opacity-50 disabled:shadow-none"
+                  >
+                    {{
+                      mode === "create"
+                        ? $t("settings.sceneEdit.button.create")
+                        : $t("settings.sceneEdit.button.update")
+                    }}
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
 
