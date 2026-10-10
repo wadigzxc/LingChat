@@ -8,8 +8,9 @@
         @click="requestClose"
       >
         <div
-          class="relative flex max-h-[92dvh] w-full max-w-7xl overflow-hidden rounded-3xl border
-            border-white/20 bg-slate-900/40 shadow-2xl backdrop-blur-2xl"
+          class="scene-editor relative flex max-h-[92dvh] w-full max-w-7xl overflow-hidden
+            rounded-3xl border border-white/20 bg-slate-900/40 shadow-2xl backdrop-blur-2xl"
+          data-editor-dialog
           role="dialog"
           aria-modal="true"
           :aria-label="text('editorTitle', '编辑场景及光影')"
@@ -17,7 +18,7 @@
           @click.stop
         >
           <!-- ====== 左栏：表单 ====== -->
-          <div class="flex w-[420px] shrink-0 flex-col border-r border-white/10">
+          <div class="editor-properties flex w-[420px] shrink-0 flex-col border-r border-white/10">
             <!-- Header -->
             <div
               class="flex shrink-0 items-center justify-between border-b border-white/10 bg-white/10
@@ -44,114 +45,120 @@
             </div>
 
             <!-- Scrollable body -->
-            <div class="flex-1 space-y-4 overflow-y-auto p-4">
+            <div class="editor-scroll min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
               <fieldset data-editor-fields :disabled="saving || !!pendingAction" class="space-y-4">
-                <!-- 场景名称 -->
-                <section>
-                  <label
-                    class="mb-1.5 flex items-center gap-2 text-xs font-bold tracking-widest
-                      text-gray-200/90 uppercase opacity-80"
-                  >
-                    <span class="h-3 w-1 rounded-full bg-orange-500"></span>
-                    {{ $t("settings.sceneEdit.label.sceneName") }}
-                  </label>
-                  <input
-                    v-model="draft.sceneName"
-                    :aria-label="text('sceneName', '场景名称')"
-                    :placeholder="$t('settings.sceneEdit.placeholder.sceneName')"
-                    class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm
-                      text-white placeholder-white/30 transition-all focus:border-indigo-400
-                      focus:ring-1 focus:ring-indigo-400/50 focus:outline-none"
-                  />
-                </section>
-
-                <!-- 场景图片 -->
-                <section>
-                  <label
-                    class="mb-1.5 flex items-center gap-2 text-xs font-bold tracking-widest
-                      text-gray-200/90 uppercase opacity-80"
-                  >
-                    <span class="h-3 w-1 rounded-full bg-indigo-500"></span>
-                    {{ $t("settings.sceneEdit.label.sceneImage") }}
-                  </label>
-                  <div class="flex gap-2">
-                    <select
-                      v-model="draft.sceneImage"
-                      :aria-label="text('sceneImage', '场景图片')"
-                      class="flex-1 appearance-none rounded-xl border border-white/10 bg-black/40
-                        px-3 py-2 text-sm text-white transition-all focus:border-indigo-400
+                <RelightingPanel :model-value="lighting" @update:model-value="updateLighting" />
+                <details open>
+                  <summary>场景信息</summary>
+                  <!-- 场景名称 -->
+                  <section>
+                    <label
+                      class="mb-1.5 flex items-center gap-2 text-xs font-bold tracking-widest
+                        text-gray-200/90 uppercase opacity-80"
+                    >
+                      <span class="h-3 w-1 rounded-full bg-orange-500"></span>
+                      {{ $t("settings.sceneEdit.label.sceneName") }}
+                    </label>
+                    <input
+                      v-model="draft.sceneName"
+                      :aria-label="text('sceneName', '场景名称')"
+                      :placeholder="$t('settings.sceneEdit.placeholder.sceneName')"
+                      class="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm
+                        text-white placeholder-white/30 transition-all focus:border-indigo-400
                         focus:ring-1 focus:ring-indigo-400/50 focus:outline-none"
+                    />
+                  </section>
+
+                  <!-- 场景图片 -->
+                  <section>
+                    <label
+                      class="mb-1.5 flex items-center gap-2 text-xs font-bold tracking-widest
+                        text-gray-200/90 uppercase opacity-80"
                     >
-                      <option value="" class="bg-slate-800 text-white/50">
-                        {{ $t("settings.sceneEdit.option.selectBackground") }}
-                      </option>
-                      <option
-                        v-for="bg in backgrounds"
-                        :key="bg.url"
-                        :value="bg.url"
-                        class="bg-slate-800 text-white"
+                      <span class="h-3 w-1 rounded-full bg-indigo-500"></span>
+                      {{ $t("settings.sceneEdit.label.sceneImage") }}
+                    </label>
+                    <div class="flex gap-2">
+                      <select
+                        v-model="draft.sceneImage"
+                        :aria-label="text('sceneImage', '场景图片')"
+                        class="flex-1 appearance-none rounded-xl border border-white/10 bg-black/40
+                          px-3 py-2 text-sm text-white transition-all focus:border-indigo-400
+                          focus:ring-1 focus:ring-indigo-400/50 focus:outline-none"
                       >
-                        {{ bg.title }}
-                      </option>
-                    </select>
-                    <Button
-                      @click="$emit('upload')"
-                      class="rounded-xl border border-white/20 bg-white/10! px-4 text-sm!
-                        whitespace-nowrap text-white! hover:bg-white/20!"
+                        <option value="" class="bg-slate-800 text-white/50">
+                          {{ $t("settings.sceneEdit.option.selectBackground") }}
+                        </option>
+                        <option
+                          v-for="bg in backgrounds"
+                          :key="bg.url"
+                          :value="bg.url"
+                          class="bg-slate-800 text-white"
+                        >
+                          {{ bg.title }}
+                        </option>
+                      </select>
+                      <Button
+                        @click="$emit('upload')"
+                        class="rounded-xl border border-white/20 bg-white/10! px-4 text-sm!
+                          whitespace-nowrap text-white! hover:bg-white/20!"
+                      >
+                        {{ $t("settings.sceneEdit.button.upload") }}
+                      </Button>
+                    </div>
+                  </section>
+
+                  <!-- 场景描述 -->
+                  <section>
+                    <label
+                      class="mb-1.5 flex items-center gap-2 text-xs font-bold tracking-widest
+                        text-gray-200/90 uppercase opacity-80"
                     >
-                      {{ $t("settings.sceneEdit.button.upload") }}
-                    </Button>
-                  </div>
-                </section>
-
-                <!-- 场景描述 -->
-                <section>
-                  <label
-                    class="mb-1.5 flex items-center gap-2 text-xs font-bold tracking-widest
-                      text-gray-200/90 uppercase opacity-80"
+                      <span class="h-3 w-1 rounded-full bg-emerald-500"></span>
+                      {{ $t("settings.sceneEdit.label.sceneDescription") }}
+                    </label>
+                    <textarea
+                      v-model="draft.sceneDescription"
+                      :aria-label="text('sceneDescription', '场景描述')"
+                      :placeholder="$t('settings.sceneEdit.placeholder.sceneDescription')"
+                      rows="2"
+                      class="w-full resize-none rounded-xl border border-white/10 bg-black/40 px-3
+                        py-2 text-sm text-white placeholder-white/30 transition-all
+                        focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/50
+                        focus:outline-none"
+                    ></textarea>
+                  </section>
+                </details>
+                <details data-legacy-lighting>
+                  <summary>旧光影与预设</summary>
+                  <LightingPresetSelect
+                    draft-only
+                    :active-preset-id="draft.lighting_preset_id"
+                    @select="choosePreset"
+                    @loaded="presets = $event"
+                  />
+                  <p data-provenance class="text-sm text-white">
+                    {{
+                      draft.lighting_preset_id
+                        ? `${text("basedOn", "基于")} ${sourcePreset ? presetName(sourcePreset) : draft.lighting_preset_id}${draft.lighting_customized ? `，${text("customized", "已自定义")}` : ""}${!sourcePreset ? `，${text("sourceDeleted", "来源已删除")}` : ""}`
+                        : draft.lighting_customized
+                          ? text("custom", "自定义")
+                          : text("systemNeutral", "系统中性")
+                    }}
+                  </p>
+                  <button
+                    data-restore-preset
+                    :disabled="!sourcePreset"
+                    @click="sourcePreset && applyPreset(sourcePreset)"
                   >
-                    <span class="h-3 w-1 rounded-full bg-emerald-500"></span>
-                    {{ $t("settings.sceneEdit.label.sceneDescription") }}
-                  </label>
-                  <textarea
-                    v-model="draft.sceneDescription"
-                    :aria-label="text('sceneDescription', '场景描述')"
-                    :placeholder="$t('settings.sceneEdit.placeholder.sceneDescription')"
-                    rows="2"
-                    class="w-full resize-none rounded-xl border border-white/10 bg-black/40 px-3
-                      py-2 text-sm text-white placeholder-white/30 transition-all
-                      focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/50
-                      focus:outline-none"
-                  ></textarea>
-                </section>
+                    {{ text("restorePreset", "恢复当前预设值") }}
+                  </button>
 
-                <LightingPresetSelect
-                  draft-only
-                  :active-preset-id="draft.lighting_preset_id"
-                  @select="choosePreset"
-                  @loaded="presets = $event"
-                />
-                <p data-provenance class="text-sm text-white">
-                  {{
-                    draft.lighting_preset_id
-                      ? `${text("basedOn", "基于")} ${sourcePreset ? presetName(sourcePreset) : draft.lighting_preset_id}${draft.lighting_customized ? `，${text("customized", "已自定义")}` : ""}${!sourcePreset ? `，${text("sourceDeleted", "来源已删除")}` : ""}`
-                      : draft.lighting_customized
-                        ? text("custom", "自定义")
-                        : text("systemNeutral", "系统中性")
-                  }}
-                </p>
-                <button
-                  data-restore-preset
-                  :disabled="!sourcePreset"
-                  @click="sourcePreset && applyPreset(sourcePreset)"
-                >
-                  {{ text("restorePreset", "恢复当前预设值") }}
-                </button>
-
-                <OverallPanel :model-value="lighting" @update:model-value="updateLighting" />
-                <CharacterPanel :model-value="lighting" @update:model-value="updateLighting" />
-                <ScenePanel :model-value="lighting" @update:model-value="updateLighting" />
-                <AssetLayersPanel :model-value="lighting" @update:model-value="updateLighting" />
+                  <OverallPanel :model-value="lighting" @update:model-value="updateLighting" />
+                  <CharacterPanel :model-value="lighting" @update:model-value="updateLighting" />
+                  <ScenePanel :model-value="lighting" @update:model-value="updateLighting" />
+                  <AssetLayersPanel :model-value="lighting" @update:model-value="updateLighting" />
+                </details>
               </fieldset>
             </div>
             <p
@@ -163,7 +170,10 @@
               {{ saveError }}
             </p>
             <!-- Footer -->
-            <div class="flex shrink-0 flex-col gap-3 border-t border-white/10 bg-white/5 p-3">
+            <div
+              data-editor-footer
+              class="flex shrink-0 flex-col gap-3 border-t border-white/10 bg-white/5 p-3"
+            >
               <div
                 v-if="pendingAction"
                 role="alertdialog"
@@ -200,6 +210,16 @@
                 </div>
               </div>
               <div class="flex flex-wrap items-center justify-between gap-2">
+                <button
+                  data-reset-relighting
+                  type="button"
+                  :disabled="saving || !!pendingAction || !lighting.relighting"
+                  @click="resetRelighting"
+                  class="rounded-lg border border-white/20 px-3 py-2 text-sm text-white/80
+                    disabled:opacity-50"
+                >
+                  重置单灯受光
+                </button>
                 <button
                   data-restore-neutral
                   type="button"
@@ -276,6 +296,8 @@
   import AssetLayersPanel from "./lighting/AssetLayersPanel.vue";
   import ScenePanel from "./lighting/ScenePanel.vue";
   import CharacterPanel from "./lighting/CharacterPanel.vue";
+  import { createRelightingParams } from "@/utils/scene-lighting/relighting-params";
+  import RelightingPanel from "./lighting/RelightingPanel.vue";
   import OverallPanel from "./lighting/OverallPanel.vue";
   const props = defineProps<SceneEditorProps>();
   const emit = defineEmits<{ close: []; submit: [data: SceneEditorData]; upload: [] }>();
@@ -337,4 +359,58 @@
     { close: () => emit("close"), submit: (data) => emit("submit", data) },
     resolveAvatar
   );
+  function resetRelighting() {
+    updateLighting({ ...lighting.value, relighting: createRelightingParams() });
+  }
 </script>
+<style scoped>
+  .scene-editor {
+    height: min(860px, 92dvh);
+    background: var(--panel-bg, #172235);
+    border-color: var(--border-color, #334155);
+    backdrop-filter: none;
+    border-radius: 1rem;
+  }
+  .editor-properties {
+    width: 360px;
+    min-height: 0;
+    order: 2;
+    border-left: 1px solid #ffffff15;
+    border-right: 0;
+  }
+  .scene-editor :deep(section:has(> [data-preview-stage])) {
+    order: 1;
+    min-height: 0;
+  }
+  .scene-editor :deep([data-preview-stage]) {
+    min-height: 0;
+  }
+  summary {
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-secondary, #cbd5e1);
+    padding: 0.65rem 0;
+  }
+  summary:focus-visible {
+    outline: 2px solid var(--accent-color, #818cf8);
+  }
+  [data-editor-footer] {
+    font-size: 0.8rem;
+  }
+  @media (max-width: 760px) {
+    .scene-editor {
+      display: grid;
+      grid-template-rows: minmax(160px, 35%) minmax(0, 1fr);
+      height: 94dvh;
+      max-height: 94dvh;
+    }
+    .editor-properties {
+      width: 100%;
+      border-left: 0;
+      overflow: hidden;
+    }
+    .scene-editor :deep(section:has(> [data-preview-stage])) {
+      padding: 0.5rem;
+    }
+  }
+</style>

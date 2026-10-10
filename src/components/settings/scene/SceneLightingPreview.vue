@@ -2,6 +2,7 @@
   import { computed, ref, watch, onMounted, onScopeDispose } from "vue";
   import { useSceneEditorText } from "./useSceneEditorText";
   import { useI18n } from "vue-i18n";
+  import RelightingGizmo from "./RelightingGizmo.vue";
   import defaultBackground from "@/assets/images/default_bg.jpg";
   import SourceImagePresentation from "@/components/game/lighting/SourceImagePresentation.vue";
   import { resolveLightingRoute } from "@/utils/scene-lighting/relighting/route";
@@ -36,6 +37,36 @@
       CSS.supports("mix-blend-mode", "plus-lighter"),
   };
   const stage = ref<HTMLElement>();
+  const sourceStatus = ref("");
+  let statusObserver: MutationObserver | undefined;
+  function readStatus() {
+    const sources = Array.from(
+      stage.value?.querySelectorAll<HTMLElement>("[data-relighting-image]") ?? []
+    );
+    const reasons = sources
+      .map((el) => el.dataset.relightingReason)
+      .filter(
+        (reason) => reason && !["target-miss", "disabled", "legacy", "hidden"].includes(reason)
+      );
+    const failures = reasons.filter((reason) => reason !== "loading");
+    sourceStatus.value = failures.length
+      ? `受光不可用，显示原图：${Array.from(new Set(failures)).join("；")}`
+      : sources.some((el) => el.dataset.sourceLoading === "true") || reasons.includes("loading")
+        ? "正在加载预览…"
+        : "";
+  }
+  onMounted(() => {
+    statusObserver = new MutationObserver(readStatus);
+    if (stage.value)
+      statusObserver.observe(stage.value, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["data-relighting-state", "data-relighting-reason", "data-source-loading"],
+      });
+    readStatus();
+  });
+  onScopeDispose(() => statusObserver?.disconnect());
   const drag = ref<{ id: number; angle: boolean } | null>(null);
   function startDrag(event: PointerEvent, angle = false) {
     if (props.disabled) return;
@@ -107,7 +138,18 @@
     { flush: "sync" }
   );
   watch(avatarSrc, detectCachedAvatar, { flush: "post" });
-  const original = ref(false);
+  // Transient comparison never enters the draft/save path.
+  const compareBypass = ref(false);
+  const original = compareBypass;
+  function holdOriginal() {
+    if (!props.disabled) compareBypass.value = true;
+  }
+  watch(
+    () => props.disabled,
+    (value) => {
+      if (value) release();
+    }
+  );
   function release() {
     original.value = false;
     drag.value = null;
@@ -151,9 +193,7 @@
     },
     { immediate: true, deep: true }
   );
-  const sourceOnly = computed(
-    () => resolveLightingRoute(renderedLighting.value).kind === "relighting"
-  );
+  const sourceOnly = computed(() => resolveLightingRoute(props.lighting).kind === "relighting");
   const background = computed(() => compileLighting(renderedLighting.value, "background", options));
 </script>
 <template>
@@ -161,19 +201,29 @@
     <p v-if="warnings.length" data-preview-warnings role="status" class="text-xs text-amber-300">
       {{ warnings.join("；") }}
     </p>
-    <button
-      data-view-original
-      @keydown.space.prevent="original = true"
-      @keydown.enter.prevent="original = true"
-      @keyup.space="release"
-      @keyup.enter="release"
-      @blur="release"
-      :aria-pressed="original"
-      @pointerdown.prevent="original = true"
-      @pointerup="original = false"
-    >
-      {{ text("holdOriginal", "按住查看原图") }}
-    </button>
+    <div class="flex items-center justify-between gap-3 text-sm text-white/80">
+      <p data-preview-status role="status" class="text-xs">
+        {{ !avatarSrc ? "无角色立绘 · 仅预览背景" : live2d ? "静态立绘预览" : "场景预览"
+        }}{{ sourceStatus ? ` · ${sourceStatus}` : "" }}
+      </p>
+      <button
+        class="shrink-0 rounded-lg border border-white/20 px-3 py-2 disabled:opacity-40"
+        data-view-original
+        @keydown.space.prevent="holdOriginal"
+        @keydown.enter.prevent="holdOriginal"
+        @keyup.space="release"
+        @keyup.enter="release"
+        @blur="release"
+        :aria-pressed="original"
+        @pointerdown.prevent="holdOriginal"
+        @pointercancel="release"
+        @lostpointercapture="release"
+        :disabled="disabled"
+        @pointerup="original = false"
+      >
+        {{ text("holdOriginal", "按住查看原图") }}
+      </button>
+    </div>
     <div
       ref="stage"
       data-preview-stage
@@ -275,7 +325,14 @@
         :lighting="renderedLighting"
         style="z-index: 4"
       />
+      <RelightingGizmo
+        :lighting="lighting"
+        :stage="stage"
+        :disabled="disabled"
+        @update:lighting="emit('update:lighting', $event)"
+      />
       <button
+        v-if="!lighting.relighting?.enabled"
         data-drag-light-position
         :disabled="disabled"
         :aria-label="text('dragPosition', '拖动主光位置')"
@@ -292,7 +349,7 @@
         ＋
       </button>
       <button
-        v-if="lighting.main_light.shape === 'linear'"
+        v-if="!lighting.relighting?.enabled && lighting.main_light.shape === 'linear'"
         data-drag-light-angle
         :disabled="disabled"
         :aria-label="text('dragAngle', '拖动主光角度')"

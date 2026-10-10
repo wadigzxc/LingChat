@@ -65,6 +65,241 @@ beforeEach(() => {
   roleFixture.gameRoles = {};
 });
 describe("scene editor draft", () => {
+  for (const failure of [false, true])
+    it(`settles a pending save after unmount without late UI effects (${failure})`, async () => {
+      let settle!: () => void;
+      const saveScene = vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            settle = () => (failure ? reject(new Error("late failure")) : resolve());
+          })
+      );
+      const w = await open(initial(), { saveScene });
+      await w.get('[aria-label="启用单灯受光"]').setValue(true);
+      await w
+        .findAll("button")
+        .find((b) => b.text() === "settings.sceneEdit.button.update")!
+        .trigger("click");
+      const successes = ui.showSuccess.mock.calls.length,
+        errors = ui.showError.mock.calls.length;
+      w.unmount();
+      settle();
+      await flushPromises();
+      expect(ui.showSuccess.mock.calls.length).toBe(successes);
+      expect(ui.showError.mock.calls.length).toBe(errors);
+      expect(w.emitted("submit")).toBeUndefined();
+      expect(w.emitted("close")).toBeUndefined();
+    });
+  it("guards a parent close after a saving failure instead of losing it", async () => {
+    let reject!: (error: Error) => void;
+    const saveScene = vi.fn(() => new Promise<void>((_resolve, r) => (reject = r)));
+    const w = await open(initial(), { saveScene });
+    await w.get('[aria-label="启用单灯受光"]').setValue(true);
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "settings.sceneEdit.button.update")!
+      .trigger("click");
+    await w.setProps({ show: false });
+    reject(new Error("disk full"));
+    await flushPromises();
+    expect(w.find("[data-draft-discard]").exists()).toBe(true);
+    expect(w.get('[aria-label="场景名称"]').element).toHaveProperty("value", "Room");
+    await w.get("[data-draft-discard]").trigger("click");
+    expect(w.emitted("close")).toHaveLength(1);
+    w.unmount();
+  });
+  for (const fails of [false, true])
+    it(`serializes latest switches then parent close during save (${fails})`, async () => {
+      let settle!: () => void;
+      const saveScene = vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            settle = () => (fails ? reject(new Error("disk full")) : resolve());
+          })
+      );
+      const w = await open(initial(), { sceneKey: "old", saveScene });
+      await w.get('[aria-label="启用单灯受光"]').setValue(true);
+      await w
+        .findAll("button")
+        .find((b) => b.text() === "settings.sceneEdit.button.update")!
+        .trigger("click");
+      await w.setProps({ initialData: { ...initial(), sceneName: "Next" }, sceneKey: "next" });
+      await w.setProps({ initialData: { ...initial(), sceneName: "Latest" }, sceneKey: "latest" });
+      await w.setProps({ show: false });
+      settle();
+      await flushPromises();
+      expect(saveScene).toHaveBeenCalledWith(expect.objectContaining({ sceneName: "Room" }), {
+        sceneKey: "old",
+        mode: "update",
+      });
+      if (fails) {
+        expect(w.find("[data-draft-discard]").exists()).toBe(true);
+        await w.get("[data-draft-discard]").trigger("click");
+      }
+      expect(w.emitted("close")).toHaveLength(1);
+      await vi.waitFor(() => expect(w.find("[data-editor-dialog]").exists()).toBe(false));
+      w.unmount();
+    });
+  it("applies only the latest scene requested while an older snapshot is saving", async () => {
+    let resolve!: () => void;
+    const saveScene = vi.fn(
+      () =>
+        new Promise<void>((r) => {
+          resolve = r;
+        })
+    );
+    const w = await open(initial(), { sceneKey: "old", saveScene });
+    await w.get('[aria-label="启用单灯受光"]').setValue(true);
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "settings.sceneEdit.button.update")!
+      .trigger("click");
+    await w.setProps({ initialData: { ...initial(), sceneName: "Next" }, sceneKey: "next" });
+    await w.setProps({ initialData: { ...initial(), sceneName: "Latest" }, sceneKey: "latest" });
+    resolve();
+    await flushPromises();
+    expect(saveScene).toHaveBeenCalledWith(expect.objectContaining({ sceneName: "Room" }), {
+      sceneKey: "old",
+      mode: "update",
+    });
+    expect(w.get('[aria-label="场景名称"]').element).toHaveProperty("value", "Latest");
+    w.unmount();
+  });
+  it("retains the old dirty draft and guards a queued scene after saving fails", async () => {
+    let reject!: (error: Error) => void;
+    const saveScene = vi.fn(
+      () =>
+        new Promise<void>((_resolve, r) => {
+          reject = r;
+        })
+    );
+    const w = await open(initial(), { sceneKey: "old", saveScene });
+    await w.get('[aria-label="启用单灯受光"]').setValue(true);
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "settings.sceneEdit.button.update")!
+      .trigger("click");
+    await w.setProps({ initialData: { ...initial(), sceneName: "Next" }, sceneKey: "next" });
+    reject(new Error("disk full"));
+    await flushPromises();
+    expect(w.get('[aria-label="场景名称"]').element).toHaveProperty("value", "Room");
+    expect(w.find("[data-draft-discard]").exists()).toBe(true);
+    expect(w.emitted("submit")).toBeUndefined();
+    await w.get("[data-draft-discard]").trigger("click");
+    expect(w.get('[aria-label="场景名称"]').element).toHaveProperty("value", "Next");
+    w.unmount();
+  });
+  it("keeps the relighting save snapshot locked when scene props change during the save", async () => {
+    let resolve!: () => void;
+    const saveScene = vi.fn(() => new Promise<void>((r) => (resolve = r)));
+    const w = await open(initial(), { sceneKey: "old", saveScene });
+    await w.get('[aria-label="启用单灯受光"]').setValue(true);
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "settings.sceneEdit.button.update")!
+      .trigger("click");
+    await w.setProps({ initialData: { ...initial(), sceneName: "Next" }, sceneKey: "new" });
+    expect(w.get("[data-editor-fields]").attributes("disabled")).toBeDefined();
+    expect(w.get("[data-view-original]").attributes("disabled")).toBeDefined();
+    resolve();
+    await flushPromises();
+    expect(saveScene).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sceneName: "Room",
+        lighting: expect.objectContaining({
+          relighting: expect.objectContaining({ enabled: true }),
+        }),
+      }),
+      { sceneKey: "old", mode: "update" }
+    );
+    expect(w.emitted("submit")?.[0]?.[0]).toMatchObject({ sceneName: "Room" });
+    expect(w.get('[aria-label="场景名称"]').element).toHaveProperty("value", "Next");
+    w.unmount();
+  });
+  it("keeps legacy controls collapsed beside a preview-led editor and persistent draft footer", async () => {
+    const w = await open();
+    const legacy = w.get("[data-legacy-lighting]");
+    expect(legacy.element.tagName).toBe("DETAILS");
+    expect(legacy.attributes("open")).toBeUndefined();
+    expect(w.get("[data-editor-footer]").element.closest(".overflow-y-auto")).toBeNull();
+    expect(w.get("[data-editor-dialog]").classes()).toContain("scene-editor");
+    w.unmount();
+  });
+  it("edits bounded point fields and resets only the relighting block", async () => {
+    const source = createNeutralLighting();
+    source.character.brightness = 1.6;
+    const w = await open(initial(source));
+    await w.get('[aria-label="启用单灯受光"]').setValue(true);
+    expect(w.get("[data-ambient-original-note]").text()).toContain("不生效");
+    await w.get('[aria-label="单灯启用"]').setValue(false);
+    await w.get('[aria-label="单灯颜色"]').setValue("#abcdef");
+    for (const [label, value] of [
+      ["单灯位置X", 0.2],
+      ["单灯位置Y", 0.8],
+      ["单灯范围", 2],
+      ["单灯柔度", 0],
+    ] as const)
+      await w.get(`[aria-label="${label}"]`).setValue(value);
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "settings.sceneEdit.button.update")!
+      .trigger("click");
+    expect(w.emitted("submit")?.[0]?.[0]).toMatchObject({
+      lighting: {
+        relighting: {
+          point_light: { enabled: false, color: "#abcdef", x: 0.2, y: 0.8, radius: 2, softness: 0 },
+        },
+      },
+    });
+    await w.get('[aria-label="单灯范围"]').setValue(99);
+    expect(w.get('[aria-label="单灯范围"]').element).toHaveProperty("value", "2");
+    await w.get("[data-reset-relighting]").trigger("click");
+    expect(w.get('[aria-label="启用单灯受光"]').element).toHaveProperty("checked", false);
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "settings.sceneEdit.button.update")!
+      .trigger("click");
+    expect(w.emitted("submit")?.[1]?.[0]).toMatchObject({
+      lighting: {
+        character: source.character,
+        enabled: true,
+        relighting: { enabled: false, mode: "original", point_light: { x: 0.5, radius: 0.75 } },
+      },
+    });
+    w.unmount();
+  });
+  it("enables source relighting explicitly in the draft without changing legacy parameters", async () => {
+    const source = createNeutralLighting();
+    source.character.brightness = 1.6;
+    const before = JSON.stringify(source);
+    const w = await open(initial(source));
+    await w.get('[aria-label="启用单灯受光"]').setValue(true);
+    await w.get('[aria-label="受光模式"]').setValue("relight");
+    await w.get('[aria-label="作用对象"]').setValue("character");
+    await w.get('[aria-label="环境光颜色"]').setValue("#123456");
+    await w.get('[aria-label="环境光亮度"]').setValue(0.4);
+    await w.get('[aria-label="单灯亮度"]').setValue(1.7);
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "settings.sceneEdit.button.update")!
+      .trigger("click");
+    expect(w.emitted("submit")?.[0]?.[0]).toMatchObject({
+      lighting: {
+        enabled: true,
+        character: source.character,
+        main_light: source.main_light,
+        relighting: {
+          enabled: true,
+          mode: "relight",
+          target: "character",
+          ambient: { color: "#123456", intensity: 0.4 },
+          point_light: { intensity: 1.7 },
+        },
+      },
+    });
+    expect(JSON.stringify(source)).toBe(before);
+    w.unmount();
+  });
   it("uses translated save result titles for existing UI toasts", async () => {
     const language = createI18n({
       legacy: false,

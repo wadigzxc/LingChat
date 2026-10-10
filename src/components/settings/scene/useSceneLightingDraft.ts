@@ -1,5 +1,5 @@
 import { useSceneEditorText } from "./useSceneEditorText";
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, onScopeDispose } from "vue";
 import type { LightingParams, LightingPreset } from "@/types/scene-lighting";
 import type { BackgroundImageInfo } from "@/types";
 import { createNeutralLighting } from "@/utils/scene-lighting/defaults";
@@ -50,9 +50,19 @@ export function useSceneLightingDraft(
   const pendingAction = ref<(() => void) | null>(null);
   const saving = ref(false);
   const saveError = ref("");
+  let disposed = false;
+  onScopeDispose(() => {
+    disposed = true;
+    pendingAction.value = null;
+  });
   const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(baseline.value));
-  function request(action: () => void) {
-    if (pendingAction.value || saving.value) return;
+  function request(action: () => void, queueWhileSaving = false) {
+    if (saving.value) {
+      // 父级场景切换不能丢失；保留最新目标，但不改动正在保存的快照。
+      if (queueWhileSaving) pendingAction.value = action;
+      return;
+    }
+    if (pendingAction.value) return;
     if (dirty.value) pendingAction.value = action;
     else action();
   }
@@ -85,7 +95,7 @@ export function useSceneLightingDraft(
       if (show && !visible.value) {
         visible.value = true;
         load(props.initialData ?? empty(), { sceneKey: props.sceneKey, mode: props.mode });
-      } else if (!show && visible.value) requestClose();
+      } else if (!show && visible.value) request(close, true);
     },
     { immediate: true }
   );
@@ -95,7 +105,7 @@ export function useSceneLightingDraft(
       if (!props.show) return;
       const data = clone(props.initialData ?? empty());
       const context = { sceneKey: props.sceneKey, mode: props.mode };
-      request(() => load(data, context));
+      request(() => load(data, context), true);
     }
   );
   function updateLighting(value: LightingParams) {
@@ -143,6 +153,7 @@ export function useSceneLightingDraft(
     try {
       if (props.saveScene) await props.saveScene(clone(payload), { ...acceptedContext.value });
       else if (pendingAction.value) throw new Error("保存需要异步确认");
+      if (disposed) return;
       events.submit(payload);
       if (props.saveScene) ui.showSuccess({ title: text("saved", "场景已保存"), duration: 2000 });
       draft.value = clone(payload);
@@ -152,6 +163,7 @@ export function useSceneLightingDraft(
       if (action) action();
       else if (props.saveScene) close();
     } catch (error) {
+      if (disposed) return;
       saveError.value = String(error instanceof Error ? error.message : error);
       ui.showError({
         title: text("saveFailed", "保存失败"),

@@ -133,6 +133,7 @@
   <div
     ref="host"
     data-relighting-image
+    :data-source-loading="!!src && frame.layers.length === 0 ? 'true' : undefined"
     :data-relighting-state="state.kind"
     :data-relighting-reason="
       state.kind === 'identity' || state.kind === 'unavailable' ? state.reason : undefined

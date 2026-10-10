@@ -114,6 +114,116 @@ const filter = (element: Element) =>
   (element as HTMLElement).style.filter ||
   (element as HTMLElement).style.getPropertyValue("-webkit-filter");
 describe("shared draft preview", () => {
+  it("announces missing characters and pending or unavailable source lighting", async () => {
+    vi.stubGlobal(
+      "DOMMatrixReadOnly",
+      class {
+        is2D = true;
+        a = 1;
+        b = 0;
+        c = 0;
+        d = 1;
+      }
+    );
+    const lighting = createNeutralLighting();
+    lighting.enabled = true;
+    lighting.relighting = { ...createRelightingParams(), enabled: true };
+    const w = mount(SceneLightingPreview, { props: { lighting }, global: global() });
+    await flushPromises();
+    expect(w.get("[data-preview-status]").text()).toContain("无角色");
+    const source = w.get("[data-preview-background-source]").element;
+    source.setAttribute("data-relighting-reason", "loading");
+    await flushPromises();
+    expect(w.get("[data-preview-status]").text()).toContain("加载");
+    source.setAttribute("data-relighting-state", "unavailable");
+    source.setAttribute("data-relighting-reason", "webgl-unavailable");
+    await flushPromises();
+    expect(w.get("[data-preview-status]").text()).toContain("webgl-unavailable");
+    w.unmount();
+  });
+  it("compares through the same decoded source and restores on cancel without draft updates", async () => {
+    vi.stubGlobal(
+      "DOMMatrixReadOnly",
+      class {
+        is2D = true;
+        a = 1;
+        b = 0;
+        c = 0;
+        d = 1;
+      }
+    );
+    const lighting = createNeutralLighting();
+    lighting.enabled = true;
+    lighting.relighting = { ...createRelightingParams(), enabled: true };
+    const w = mount(SceneLightingPreview, {
+      props: { lighting, avatarUrl: "role.png" },
+      global: global(),
+    });
+    await flushPromises();
+    const source = w.get("[data-preview-avatar-source]").element;
+    await w.get("[data-view-original]").trigger("pointerdown");
+    expect(w.get("[data-preview-avatar-source]").element).toBe(source);
+    expect(w.getComponent(SourceImagePresentation).props("lighting")).toMatchObject({
+      enabled: false,
+    });
+    window.dispatchEvent(new Event("pointercancel"));
+    await flushPromises();
+    expect(w.get("[data-preview-avatar-source]").element).toBe(source);
+    expect(w.getComponent(SourceImagePresentation).props("lighting")).toMatchObject({
+      enabled: true,
+    });
+    expect(w.emitted("update:lighting")).toBeUndefined();
+    await w.setProps({ disabled: true });
+    await w.get("[data-view-original]").trigger("pointerdown");
+    expect(w.get("[data-view-original]").attributes("aria-pressed")).toBe("false");
+    w.unmount();
+  });
+  it("moves the relighting center with captured pointers and keyboard without touching legacy", async () => {
+    const lighting = createNeutralLighting();
+    lighting.enabled = true;
+    lighting.relighting = { ...createRelightingParams(), enabled: true };
+    const w = mount(SceneLightingPreview, { props: { lighting }, global: global() });
+    await flushPromises();
+    const stage = w.get("[data-preview-stage]").element;
+    vi.spyOn(stage, "getBoundingClientRect").mockReturnValue({
+      left: 10,
+      top: 20,
+      width: 400,
+      height: 200,
+    } as DOMRect);
+    const center = w.get("[data-relighting-center]");
+    const capture = vi.fn();
+    Object.assign(center.element, {
+      setPointerCapture: capture,
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: () => true,
+    });
+    const pointer = (type: string, x: number, y: number, id = 7) => {
+      const event = new MouseEvent(type, { clientX: x, clientY: y, bubbles: true });
+      Object.defineProperty(event, "pointerId", { value: id });
+      return event;
+    };
+    center.element.dispatchEvent(pointer("pointerdown", 210, 120));
+    window.dispatchEvent(pointer("pointermove", 110, 170));
+    await flushPromises();
+    expect(capture).toHaveBeenCalledWith(7);
+    const changed = w.emitted("update:lighting")!.slice(-1)[0][0] as typeof lighting;
+    expect(changed.relighting!.point_light).toMatchObject({ x: 0.25, y: 0.75 });
+    expect(changed.main_light).toEqual(lighting.main_light);
+    window.dispatchEvent(pointer("pointercancel", 110, 170));
+    const count = w.emitted("update:lighting")!.length;
+    window.dispatchEvent(pointer("pointermove", 300, 100));
+    expect(w.emitted("update:lighting")!.length).toBe(count);
+    await w.setProps({ lighting: changed });
+    await center.trigger("keydown", { key: "ArrowRight" });
+    expect(
+      (w.emitted("update:lighting")!.slice(-1)[0][0] as typeof lighting).relighting!.point_light.x
+    ).toBe(0.26);
+    await w.setProps({ disabled: true });
+    await center.trigger("keydown", { key: "ArrowRight" });
+    expect(w.emitted("update:lighting")!.length).toBe(count + 1);
+    w.unmount();
+  });
   it("keeps an uninitialized character preview empty instead of inserting unrelated sample artwork", () => {
     const lighting = createNeutralLighting();
     lighting.enabled = true;
