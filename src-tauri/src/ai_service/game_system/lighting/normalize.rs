@@ -40,6 +40,9 @@ impl LightingParams {
             layer.z_index = layer.z_index.clamp(0, 7);
             layer.opacity = clamp01(layer.opacity);
         }
+        if let Some(relighting) = &mut self.relighting {
+            relighting.normalize();
+        }
     }
 }
 

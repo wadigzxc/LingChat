@@ -1,5 +1,6 @@
 import type { LightingAssetLayer, LightingParams } from "@/types/scene-lighting";
 import { createNeutralLighting } from "./defaults";
+import { normalizeRelightingParams } from "./relighting-params";
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -100,5 +101,7 @@ export function normalizeLighting(input: unknown): LightingParams {
         };
       })
     : [];
+  const relighting = normalizeRelightingParams(source.relighting);
+  if (relighting) result.relighting = relighting;
   return result;
 }

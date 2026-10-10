@@ -5,6 +5,7 @@ import type {
   LightingAssetLayer,
 } from "@/types/scene-lighting";
 import { normalizeLighting } from "./normalize";
+import { resolveLightingRoute } from "./relighting/route";
 
 export type LightingCss = Record<string, string | number>;
 export interface CompiledLighting {
@@ -64,8 +65,7 @@ export function compileLighting(
 ): CompiledLighting {
   const lighting = normalizeLighting(input);
   if (
-    !lighting.enabled ||
-    lighting.master_intensity === 0 ||
+    resolveLightingRoute(lighting).kind !== "legacy" ||
     !["character", "background", "both"].includes(surface)
   ) {
     return {

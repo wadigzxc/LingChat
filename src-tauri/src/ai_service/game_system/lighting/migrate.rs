@@ -1,6 +1,7 @@
 use serde::{Deserialize, Deserializer, de};
 use serde_json::Value;
 
+use super::RelightingParams;
 use super::model::*;
 
 #[derive(Deserialize)]
@@ -19,6 +20,7 @@ struct LightingV2Wire {
     bloom: BloomParams,
     vignette: VignetteParams,
     asset_layers: Vec<LightingAssetLayer>,
+    relighting: Option<RelightingParams>,
 }
 
 impl Default for LightingV2Wire {
@@ -37,6 +39,7 @@ impl Default for LightingV2Wire {
             bloom: BloomParams::default(),
             vignette: VignetteParams::default(),
             asset_layers: Vec::new(),
+            relighting: None,
         }
     }
 }
@@ -47,7 +50,20 @@ impl<'de> Deserialize<'de> for LightingParams {
         D: Deserializer<'de>,
     {
         let value = Value::deserialize(deserializer)?;
-        let is_v2 = value.get("schema_version").and_then(Value::as_u64) == Some(2);
+        // 显式版本先验证；未知/错格式不能回退到旧迁移并静默丢掉新块。
+        let version = match value.get("schema_version") {
+            None => None,
+            Some(raw) => {
+                let version = raw.as_u64().ok_or_else(|| {
+                    de::Error::custom("lighting schema_version must be a nonnegative integer")
+                })?;
+                if version > u64::from(LIGHTING_SCHEMA_VERSION) {
+                    return Err(de::Error::custom("unsupported lighting schema_version"));
+                }
+                Some(version)
+            },
+        };
+        let is_v2 = version == Some(u64::from(LIGHTING_SCHEMA_VERSION));
         let mut lighting = if is_v2 {
             migrate_v2(value).map_err(de::Error::custom)?
         } else if value.get("character").is_some() || value.get("background").is_some() {
@@ -61,6 +77,19 @@ impl<'de> Deserialize<'de> for LightingParams {
 }
 
 fn migrate_v2(value: Value) -> serde_json::Result<LightingParams> {
+    // serde 的 struct visitor 可接受序列；wire 契约限定新块及内层对象为 JSON object。
+    if let Some(block) = value.get("relighting").filter(|block| !block.is_null()) {
+        let fields = block.as_object().ok_or_else(|| {
+            <serde_json::Error as de::Error>::custom("relighting must be an object or null")
+        })?;
+        for key in ["ambient", "point_light"] {
+            if fields.get(key).is_some_and(|nested| !nested.is_object()) {
+                return Err(<serde_json::Error as de::Error>::custom(format!(
+                    "relighting.{key} must be an object"
+                )));
+            }
+        }
+    }
     let wire: LightingV2Wire = serde_json::from_value(value)?;
     let defaults = LightingParams::default();
     let _input_schema_version = wire.schema_version;
@@ -80,6 +109,7 @@ fn migrate_v2(value: Value) -> serde_json::Result<LightingParams> {
         bloom: wire.bloom,
         vignette: wire.vignette,
         asset_layers: wire.asset_layers,
+        relighting: wire.relighting,
     })
 }
 

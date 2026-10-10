@@ -1,0 +1,414 @@
+{
+  "purpose": "Contract-authored test inputs, NOT production/API output; TS defensive projection and Rust typed wire are distinct acceptance domains",
+  "schema_contract": 2,
+  "factory": {
+    "enabled": false,
+    "mode": "original",
+    "target": "both",
+    "ambient": {
+      "intensity": 1,
+      "color": "#ffffff"
+    },
+    "point_light": {
+      "enabled": true,
+      "x": 0.5,
+      "y": 0.5,
+      "radius": 0.75,
+      "softness": 0.8,
+      "intensity": 0.85,
+      "color": "#fff1d2"
+    }
+  },
+  "cases": [
+    {
+      "id": "legacy-omitted",
+      "input": {
+        "schema_version": 2
+      },
+      "expected_relighting": null,
+      "runtime_wire_accepted": true,
+      "archive_valid": true
+    },
+    {
+      "id": "known-root-null",
+      "input": {
+        "schema_version": 2,
+        "relighting": null
+      },
+      "expected_relighting": null,
+      "runtime_wire_accepted": true,
+      "archive_valid": true
+    },
+    {
+      "id": "empty-block-defaults",
+      "input": {
+        "schema_version": 2,
+        "relighting": {}
+      },
+      "expected_relighting": {
+        "enabled": false,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 1,
+          "color": "#ffffff"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0.5,
+          "y": 0.5,
+          "radius": 0.75,
+          "softness": 0.8,
+          "intensity": 0.85,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": true,
+      "archive_valid": true
+    },
+    {
+      "id": "nested-missing-defaults",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "enabled": true,
+          "ambient": {},
+          "point_light": {}
+        }
+      },
+      "expected_relighting": {
+        "enabled": true,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 1,
+          "color": "#ffffff"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0.5,
+          "y": 0.5,
+          "radius": 0.75,
+          "softness": 0.8,
+          "intensity": 0.85,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": true,
+      "archive_valid": true
+    },
+    {
+      "id": "explicit-point-false",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "enabled": true,
+          "point_light": {
+            "enabled": false
+          }
+        }
+      },
+      "expected_relighting": {
+        "enabled": true,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 1,
+          "color": "#ffffff"
+        },
+        "point_light": {
+          "enabled": false,
+          "x": 0.5,
+          "y": 0.5,
+          "radius": 0.75,
+          "softness": 0.8,
+          "intensity": 0.85,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": true,
+      "archive_valid": true
+    },
+    {
+      "id": "canonical-relight-character",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "enabled": true,
+          "mode": "relight",
+          "target": "character",
+          "ambient": {
+            "intensity": 0.25,
+            "color": "#336699"
+          },
+          "point_light": {
+            "x": 0.2,
+            "y": 0.8,
+            "radius": 0.6,
+            "softness": 0,
+            "intensity": 1.5,
+            "color": "#ffcc88"
+          }
+        }
+      },
+      "expected_relighting": {
+        "enabled": true,
+        "mode": "relight",
+        "target": "character",
+        "ambient": {
+          "intensity": 0.25,
+          "color": "#336699"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0.2,
+          "y": 0.8,
+          "radius": 0.6,
+          "softness": 0,
+          "intensity": 1.5,
+          "color": "#ffcc88"
+        }
+      },
+      "runtime_wire_accepted": true,
+      "archive_valid": true
+    },
+    {
+      "id": "runtime-clamps-not-archive",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "ambient": {
+            "intensity": 9
+          },
+          "point_light": {
+            "x": -1,
+            "y": 9,
+            "radius": 0,
+            "softness": -1,
+            "intensity": 9
+          }
+        }
+      },
+      "expected_relighting": {
+        "enabled": false,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 2,
+          "color": "#ffffff"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0,
+          "y": 1,
+          "radius": 0.01,
+          "softness": 0,
+          "intensity": 4,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": true,
+      "archive_valid": false
+    },
+    {
+      "id": "unknown-enum-runtime-fallback",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "mode": "future",
+          "target": "BOTH"
+        }
+      },
+      "expected_relighting": {
+        "enabled": false,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 1,
+          "color": "#ffffff"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0.5,
+          "y": 0.5,
+          "radius": 0.75,
+          "softness": 0.8,
+          "intensity": 0.85,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": true,
+      "archive_valid": false
+    },
+    {
+      "id": "color-runtime-canonicalization",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "ambient": {
+            "color": " #AABBCC "
+          },
+          "point_light": {
+            "color": "#FfF1d2"
+          }
+        }
+      },
+      "expected_relighting": {
+        "enabled": false,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 1,
+          "color": "#aabbcc"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0.5,
+          "y": 0.5,
+          "radius": 0.75,
+          "softness": 0.8,
+          "intensity": 0.85,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": true,
+      "archive_valid": false
+    },
+    {
+      "id": "invalid-opaque-color-default",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "ambient": {
+            "color": "#abc"
+          },
+          "point_light": {
+            "color": "#ffffff80"
+          }
+        }
+      },
+      "expected_relighting": {
+        "enabled": false,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 1,
+          "color": "#ffffff"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0.5,
+          "y": 0.5,
+          "radius": 0.75,
+          "softness": 0.8,
+          "intensity": 0.85,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": true,
+      "archive_valid": false
+    },
+    {
+      "id": "nested-null-is-wire-error",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "point_light": null
+        }
+      },
+      "expected_relighting": {
+        "enabled": false,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 1,
+          "color": "#ffffff"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0.5,
+          "y": 0.5,
+          "radius": 0.75,
+          "softness": 0.8,
+          "intensity": 0.85,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": false,
+      "archive_valid": false
+    },
+    {
+      "id": "wrong-block-type-is-wire-error",
+      "input": {
+        "schema_version": 2,
+        "relighting": []
+      },
+      "expected_relighting": null,
+      "runtime_wire_accepted": false,
+      "archive_valid": false
+    },
+    {
+      "id": "wrong-scalar-type-is-wire-error",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "point_light": {
+            "x": "0.5",
+            "enabled": null
+          }
+        }
+      },
+      "expected_relighting": {
+        "enabled": false,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 1,
+          "color": "#ffffff"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0.5,
+          "y": 0.5,
+          "radius": 0.75,
+          "softness": 0.8,
+          "intensity": 0.85,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": false,
+      "archive_valid": false
+    },
+    {
+      "id": "unknown-nested-null-is-archive-error",
+      "input": {
+        "schema_version": 2,
+        "relighting": {
+          "ambient": {
+            "not_known": null
+          }
+        }
+      },
+      "expected_relighting": {
+        "enabled": false,
+        "mode": "original",
+        "target": "both",
+        "ambient": {
+          "intensity": 1,
+          "color": "#ffffff"
+        },
+        "point_light": {
+          "enabled": true,
+          "x": 0.5,
+          "y": 0.5,
+          "radius": 0.75,
+          "softness": 0.8,
+          "intensity": 0.85,
+          "color": "#fff1d2"
+        }
+      },
+      "runtime_wire_accepted": true,
+      "archive_valid": false
+    }
+  ]
+}

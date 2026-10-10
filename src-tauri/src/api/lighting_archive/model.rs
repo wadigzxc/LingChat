@@ -243,10 +243,18 @@ fn deserialize_archive_lighting<'de, D>(deserializer: D) -> Result<LightingParam
 where
     D: serde::Deserializer<'de>,
 {
-    let wire = Value::deserialize(deserializer)?;
+    let mut wire = Value::deserialize(deserializer)?;
     let lighting: LightingParams =
         serde_json::from_value(wire.clone()).map_err(serde::de::Error::custom)?;
     let typed = serde_json::to_value(&lighting).map_err(serde::de::Error::custom)?;
+    // 仅已声明的 lighting 根 nullable 字段可省略；通用递归比较器仍拒绝其他 null/未知键。
+    if lighting.relighting.is_none() {
+        if let Some(fields) = wire.as_object_mut() {
+            if fields.get("relighting").is_some_and(Value::is_null) {
+                fields.remove("relighting");
+            }
+        }
+    }
     validate_supplied_fields(&wire, &typed).map_err(serde::de::Error::custom)?;
     Ok(lighting)
 }

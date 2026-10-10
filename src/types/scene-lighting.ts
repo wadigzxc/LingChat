@@ -73,6 +73,33 @@ export interface LightingAssetLayer {
   required: boolean;
 }
 
+export type RelightingMode = "original" | "relight";
+/** Unlike legacy LightingTarget, both selects the two source surfaces independently. */
+export type RelightingTarget = "character" | "background" | "both";
+
+export interface RelightingAmbientParams {
+  intensity: number;
+  color: string;
+}
+
+export interface RelightingPointLightParams {
+  enabled: boolean;
+  x: number;
+  y: number;
+  radius: number;
+  softness: number;
+  intensity: number;
+  color: string;
+}
+
+export interface RelightingParams {
+  enabled: boolean;
+  mode: RelightingMode;
+  target: RelightingTarget;
+  ambient: RelightingAmbientParams;
+  point_light: RelightingPointLightParams;
+}
+
 export interface LightingParams {
   schema_version: 2;
   enabled: boolean;
@@ -87,6 +114,8 @@ export interface LightingParams {
   bloom: BloomParams;
   vignette: VignetteParams;
   asset_layers: LightingAssetLayer[];
+  /** Omission/null means legacy rendering, not an automatically enabled new effect. */
+  relighting?: RelightingParams | null;
 }
 
 export type SceneLightingSource = "neutral" | "scene_default" | "manual" | "ai";

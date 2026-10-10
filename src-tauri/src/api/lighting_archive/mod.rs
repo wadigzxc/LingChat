@@ -18,6 +18,8 @@ pub use model::{
 pub use validate::{LingLightError, StagedAsset, ValidatedLingLight, validate_linglight};
 
 #[cfg(test)]
+mod relighting_model_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_export;

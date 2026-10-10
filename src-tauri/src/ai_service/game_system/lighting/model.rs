@@ -1,3 +1,4 @@
+use super::RelightingParams;
 use serde::{Deserialize, Serialize};
 
 pub const LIGHTING_SCHEMA_VERSION: u32 = 2;
@@ -319,6 +320,8 @@ pub struct LightingParams {
     pub bloom: BloomParams,
     pub vignette: VignetteParams,
     pub asset_layers: Vec<LightingAssetLayer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relighting: Option<RelightingParams>,
 }
 
 impl Default for LightingParams {
@@ -337,6 +340,7 @@ impl Default for LightingParams {
             bloom: BloomParams::default(),
             vignette: VignetteParams::default(),
             asset_layers: Vec::new(),
+            relighting: None,
         }
     }
 }

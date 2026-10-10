@@ -1,6 +1,27 @@
 import { expect, it } from "vitest";
 import { createNeutralLighting } from "../defaults";
 import { compileLighting } from "../style";
+import { createRelightingParams } from "../relighting-params";
+
+it("stops every legacy slot when the new block is enabled, including target misses", () => {
+  const input = createNeutralLighting();
+  input.enabled = true;
+  input.character.brightness = 2;
+  input.main_light.enabled = true;
+  input.main_light.opacity = 1;
+  input.relighting = { ...createRelightingParams(), enabled: true, target: "background" };
+  for (const surface of ["character", "background", "both"] as const) {
+    expect(compileLighting(input, surface)).toEqual({
+      filter: "none",
+      mainLight: null,
+      ambient: null,
+      bloom: null,
+      vignette: null,
+      assets: [],
+      warnings: [],
+    });
+  }
+});
 
 it("keeps legacy correction order including glow before sepia", () => {
   const input = createNeutralLighting();
