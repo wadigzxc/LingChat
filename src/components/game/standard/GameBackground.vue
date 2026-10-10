@@ -15,6 +15,9 @@
         ref="imageFadeRef"
         class="game-background"
         :src="backgroundSrc"
+        :lighting="lighting"
+        surface="background"
+        :scene-root="sceneRoot"
         position="center center"
         object-fit="cover"
         :duration="uiStore.currentBackgroundTransition"
@@ -128,7 +131,7 @@
   import { compileLighting } from "@/utils/scene-lighting/style";
   import { LightingOverlay, LightingAssetStack } from "@/components/game/lighting";
   import { useSceneLighting } from "@/composables/useSceneLighting";
-  import ImageAcrossFade from "@/components/ui/ImageAcrossFade.vue";
+  import ImageAcrossFade from "@/components/game/lighting/SourceImagePresentation.vue";
   import AudioAcrossFade from "@/components/ui/AudioAcrossFade.vue";
   import AmbientLoopPlayer from "@/components/ui/AmbientLoopPlayer.vue";
   import StarField from "./particles/StarField.vue";
@@ -138,7 +141,7 @@
   import Fireworks from "./particles/Fireworks.vue";
 
   const uiStore = useUIStore();
-  const { lighting, simplified, options, resolveAsset } = useSceneLighting();
+  const { lighting, simplified, options, resolveAsset, sceneRoot } = useSceneLighting();
   const compiledBackground = computed(() => compileLighting(lighting.value, "background", options));
 
   const backgroundSrc = computed(() => {

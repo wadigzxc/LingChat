@@ -1,5 +1,7 @@
 <script setup lang="ts">
-  import { computed } from "vue";
+  import { computed, ref, onMounted, onBeforeUnmount } from "vue";
+  import SourceImagePresentation from "@/components/game/lighting/SourceImagePresentation.vue";
+  import { resolveLightingRoute } from "@/utils/scene-lighting/relighting/route";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { Image } from "lucide-vue-next";
   import type { LightingParams } from "@/types/scene-lighting";
@@ -21,11 +23,37 @@
   };
   const backgroundStyle = computed(() => compileLighting(thumbnail.value, "background", options));
   const overallStyle = computed(() => compileLighting(thumbnail.value, "both", options));
+  const root = ref<HTMLElement | null>(null);
+  const sourceOnly = computed(() => resolveLightingRoute(thumbnail.value).kind === "relighting");
+  const visible = ref(false);
+  let visibilityObserver: IntersectionObserver | null = null;
+  onMounted(() => {
+    visibilityObserver = new IntersectionObserver((entries) => {
+      visible.value = entries.some((entry) => entry.isIntersecting);
+    });
+    if (root.value) visibilityObserver.observe(root.value);
+  });
+  onBeforeUnmount(() => {
+    visibilityObserver?.disconnect();
+  });
 </script>
 <template>
-  <div class="relative aspect-video overflow-hidden">
+  <div ref="root" class="relative aspect-video overflow-hidden">
+    <SourceImagePresentation
+      v-if="background && sourceOnly"
+      data-card-background-source
+      :key="background"
+      :src="convertFileSrc(background)"
+      :lighting="thumbnail"
+      :scene-root="root"
+      :visible="visible"
+      surface="background"
+      object-fit="cover"
+      position="center center"
+      :duration="0"
+    />
     <img
-      v-if="background"
+      v-else-if="background"
       data-card-background
       :src="convertFileSrc(background)"
       :alt="name"

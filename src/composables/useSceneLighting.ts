@@ -1,9 +1,20 @@
-import { computed, reactive, watch, onScopeDispose, inject, provide, type InjectionKey } from "vue";
+import {
+  computed,
+  reactive,
+  watch,
+  onScopeDispose,
+  inject,
+  provide,
+  ref,
+  type Ref,
+  type InjectionKey,
+} from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveLightingAsset } from "@/api/services/scene-lighting";
 import { useGameStore } from "@/stores/modules/game";
 import { useSettingsStore } from "@/stores/modules/settings";
 import type { LightingAssetLayer } from "@/types/scene-lighting";
+import { resolveLightingRoute } from "@/utils/scene-lighting/relighting/route";
 import { normalizeLighting } from "@/utils/scene-lighting/normalize";
 import { resolvedLightingAssetPath } from "@/utils/scene-lighting/asset-path";
 import {
@@ -17,15 +28,15 @@ import { i18n } from "@/locales";
 let addBlendWarned = false;
 const sceneLightingKey: InjectionKey<ReturnType<typeof createSceneLighting>> =
   Symbol("scene-lighting");
-export function provideSceneLighting() {
-  const context = createSceneLighting();
+export function provideSceneLighting(sceneRoot: Ref<HTMLElement | null | undefined> = ref(null)) {
+  const context = createSceneLighting(sceneRoot);
   provide(sceneLightingKey, context);
   return context;
 }
 export function useSceneLighting() {
   return inject(sceneLightingKey, null) ?? createSceneLighting();
 }
-function createSceneLighting() {
+function createSceneLighting(sceneRoot: Ref<HTMLElement | null | undefined> = ref(null)) {
   const game = useGameStore();
   const settings = useSettingsStore();
   const sourceLighting = computed(() => game.activeLighting);
@@ -78,7 +89,7 @@ function createSceneLighting() {
       const current = ++sequence;
       urls.clear();
       const input = normalizeLighting(lighting.value);
-      if (!input.enabled || simplified.value) return;
+      if (resolveLightingRoute(input).kind !== "legacy" || simplified.value) return;
       for (const layer of input.asset_layers) {
         if (!/^[a-f0-9]{64}$/.test(layer.asset_hash)) continue;
         const cached = cache.get(layer.asset_hash);
@@ -110,6 +121,7 @@ function createSceneLighting() {
     { immediate: true, deep: true }
   );
   return {
+    sceneRoot,
     lighting,
     simplified,
     options,

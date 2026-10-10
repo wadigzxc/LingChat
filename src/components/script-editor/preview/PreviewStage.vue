@@ -19,7 +19,12 @@
           GameDialog 作为普通块元素落在最上面，于是试玩时对话框跑到了屏幕顶部。
           复用同一个类还顺带保证：以后正式游玩的布局改了，试玩跟着一起变。
         -->
-        <div class="main-box" :style="{ isolation: 'isolate' }">
+        <div
+          ref="sceneRoot"
+          data-relighting-scene
+          class="main-box"
+          :style="{ isolation: 'isolate' }"
+        >
           <!-- 复用真实的游戏渲染层。这是当初选「复用真引擎 + 真渲染层」而不是
                另写一套预览解释器的兑现点：这四个组件读的是同一份 store，
                引擎 emit 的事件经 eventQueue 进来后，表现与正式游玩逐帧一致。 -->
@@ -89,7 +94,7 @@
 
 <script setup lang="ts">
   import { provideSceneLighting } from "@/composables/useSceneLighting";
-  import { computed, watch } from "vue";
+  import { computed, watch, ref } from "vue";
   import { useI18n } from "vue-i18n";
   import {
     GameBackground,
@@ -103,7 +108,8 @@
   import { useScriptEditorStore } from "@/stores/modules/script-editor";
   import { useGameStore } from "@/stores/modules/game";
 
-  const { lighting, simplified, options, resolveAsset } = provideSceneLighting();
+  const sceneRoot = ref<HTMLElement | null>(null);
+  const { lighting, simplified, options, resolveAsset } = provideSceneLighting(sceneRoot);
   const { t } = useI18n();
   const store = useScriptEditorStore();
   const gameStore = useGameStore();

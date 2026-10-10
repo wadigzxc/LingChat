@@ -1,5 +1,7 @@
 <template>
   <div
+    ref="sceneRoot"
+    data-relighting-scene
     class="cast-shell fixed inset-0 z-0 overflow-hidden bg-black"
     :class="{ 'cast-hide-dialog': tune.dialogHidden }"
     :style="{ ...castShellStyle, isolation: 'isolate' }"
@@ -109,7 +111,8 @@
     dialogHidden: boolean;
   }
 
-  const { lighting, simplified, options, resolveAsset } = provideSceneLighting();
+  const sceneRoot = ref<HTMLElement | null>(null);
+  const { lighting, simplified, options, resolveAsset } = provideSceneLighting(sceneRoot);
   const gameStore = useGameStore();
   const uiStore = useUIStore();
 

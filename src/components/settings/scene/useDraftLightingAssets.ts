@@ -1,4 +1,5 @@
 import { useI18n } from "vue-i18n";
+import { resolveLightingRoute } from "@/utils/scene-lighting/relighting/route";
 import { computed, ref, reactive, watch, onScopeDispose, type Ref } from "vue";
 import {
   lightingForPlatform,
@@ -29,7 +30,7 @@ export function useDraftLightingAssets(lighting: Readonly<Ref<LightingParams>>) 
       const current = ++sequence;
       urls.clear();
       warnings.value = [];
-      if (!input.enabled) return;
+      if (resolveLightingRoute(input).kind !== "legacy") return;
       for (const layer of input.asset_layers) {
         if (!/^[a-f0-9]{64}$/.test(layer.asset_hash)) {
           warnings.value.push(t("ui.lighting.invalidAssetHash", { id: layer.id }));

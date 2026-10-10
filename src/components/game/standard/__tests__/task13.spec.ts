@@ -2,6 +2,51 @@ import { defineComponent, h, nextTick, reactive, ref } from "vue";
 import { mount, flushPromises } from "@vue/test-utils";
 import { beforeEach, expect, it, vi } from "vitest";
 import { createNeutralLighting } from "@/utils/scene-lighting/defaults";
+import { createRelightingParams } from "@/utils/scene-lighting/relighting-params";
+it.each(["main", "cast", "preview"])(
+  "%s owns a scene coordinate root and stops every legacy overlay/resolver",
+  async (kind) => {
+    setupOverall();
+    // jsdom has no DOMMatrix; real matrix/pixels are separately verified in the browser harness.
+    vi.stubGlobal(
+      "DOMMatrixReadOnly",
+      class {
+        is2D = true;
+        a = 1;
+        b = 0;
+        c = 0;
+        d = 1;
+      }
+    );
+    stores.game.activeLighting.relighting = { ...createRelightingParams(), enabled: true };
+    const play = HTMLMediaElement.prototype.play;
+    const volume = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume")!;
+    const wrapper = mount(
+      kind === "main" ? MainChat : kind === "cast" ? CastWindow : PreviewStage,
+      {
+        global: {
+          stubs: { ...stubs, ImageAcrossFade: false, teleport: true },
+          mocks: { $t: (key: string) => key },
+        },
+      }
+    );
+    await flushPromises();
+    try {
+      expect(wrapper.find("[data-relighting-scene]").exists()).toBe(true);
+      const source = wrapper.findComponent({ name: "SourceImagePresentation" });
+      expect(source.props("sceneRoot")).toBe(wrapper.get("[data-relighting-scene]").element);
+      expect(wrapper.findAll("[data-lighting-effect]")).toHaveLength(0);
+      expect(wrapper.findAll("[data-lighting-assets]")).toHaveLength(0);
+      expect(
+        invokeMock.mock.calls.filter(([command]) => command === "resolve_lighting_asset")
+      ).toHaveLength(0);
+    } finally {
+      wrapper.unmount();
+      HTMLMediaElement.prototype.play = play;
+      Object.defineProperty(HTMLMediaElement.prototype, "volume", volume);
+    }
+  }
+);
 import { tauriMocks, resetTauriMocks } from "@/test/setup";
 import { invoke } from "@tauri-apps/api/core";
 const invokeMock = vi.mocked(invoke);
@@ -450,7 +495,12 @@ it("real fallback artwork does not remain visible after its URL disappears", asy
     expect(cssFilter(wrapper.get("[data-lighting-visual]").element)).toBe("brightness(1.4)");
     ready.value.add(1);
     await nextTick();
-    expect(wrapper.getComponent(ImageAcrossFade).attributes("style")).toContain("display: none");
+    expect(
+      wrapper
+        .getComponent(ImageAcrossFade)
+        .element.closest("[data-relighting-image]")
+        ?.getAttribute("style")
+    ).toContain("display: none");
     expect(cssFilter(wrapper.get("[data-lighting-visual]").element)).toBe("none");
     expect(wrapper.find("[data-lighting-character-effects]").exists()).toBe(false);
     ready.value.delete(1);

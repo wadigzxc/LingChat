@@ -3,6 +3,8 @@
   import { useSceneEditorText } from "./useSceneEditorText";
   import { useI18n } from "vue-i18n";
   import defaultBackground from "@/assets/images/default_bg.jpg";
+  import SourceImagePresentation from "@/components/game/lighting/SourceImagePresentation.vue";
+  import { resolveLightingRoute } from "@/utils/scene-lighting/relighting/route";
 
   import type { LightingParams } from "@/types/scene-lighting";
   import { compileLighting } from "@/utils/scene-lighting/style";
@@ -149,6 +151,9 @@
     },
     { immediate: true, deep: true }
   );
+  const sourceOnly = computed(
+    () => resolveLightingRoute(renderedLighting.value).kind === "relighting"
+  );
   const background = computed(() => compileLighting(renderedLighting.value, "background", options));
 </script>
 <template>
@@ -176,7 +181,21 @@
       style="isolation: isolate"
     >
       <div class="absolute inset-0" style="z-index: 0; isolation: isolate">
+        <SourceImagePresentation
+          v-if="sourceOnly"
+          data-preview-background-source
+          :key="backgroundSrc"
+          :src="backgroundSrc"
+          :lighting="renderedLighting"
+          :scene-root="stage"
+          surface="background"
+          object-fit="cover"
+          position="center center"
+          :duration="0"
+          @source-error="backgroundFailed = true"
+        />
         <img
+          v-else
           data-preview-background
           :key="backgroundSrc"
           :src="backgroundSrc"
@@ -209,8 +228,22 @@
         :show-vignette="false"
         style="z-index: 1"
       />
+      <SourceImagePresentation
+        v-if="sourceOnly && avatarSrc"
+        data-preview-avatar-source
+        :key="avatarSrc"
+        :src="avatarSrc"
+        :lighting="renderedLighting"
+        :scene-root="stage"
+        surface="character"
+        object-fit="contain"
+        position="center center"
+        :duration="0"
+        :style="avatarStyle"
+        @source-error="avatarFailed = true"
+      />
       <StaticCharacterLightingFrame
-        v-if="avatarSrc"
+        v-else-if="avatarSrc"
         :live2d="live2d"
         :live2d-ready="false"
         :fallback-visible="avatarLoaded"

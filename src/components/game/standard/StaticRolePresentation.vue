@@ -12,6 +12,10 @@
         class="absolute h-[102%] w-full"
         :class="animationClasses"
         :src="src"
+        :lighting="lighting"
+        :scene-root="sceneRoot"
+        surface="character"
+        :visible="visible"
         :duration="300"
         position="center bottom"
         :object-fit="objectFit"
@@ -24,7 +28,9 @@
 <script setup lang="ts">
   import { ref } from "vue";
 
-  import ImageAcrossFade from "@/components/ui/ImageAcrossFade.vue";
+  import ImageAcrossFade from "@/components/game/lighting/SourceImagePresentation.vue";
+  import { useSceneLighting } from "@/composables/useSceneLighting";
+  const { lighting, sceneRoot } = useSceneLighting();
 
   withDefaults(
     defineProps<{

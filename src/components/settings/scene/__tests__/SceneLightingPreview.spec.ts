@@ -5,6 +5,50 @@ import ui from "@/locales/zh-CN/ui";
 import { describe, expect, it, vi } from "vitest";
 import SceneLightingPreview from "../SceneLightingPreview.vue";
 import { createNeutralLighting } from "@/utils/scene-lighting/defaults";
+import { createRelightingParams } from "@/utils/scene-lighting/relighting-params";
+import SourceImagePresentation from "@/components/game/lighting/SourceImagePresentation.vue";
+import SceneCardLightingPreview from "../SceneCardLightingPreview.vue";
+it("modal relighting owns real source-only background and avatar, with no draft legacy resolver", async () => {
+  vi.stubGlobal(
+    "DOMMatrixReadOnly",
+    class {
+      is2D = true;
+      a = 1;
+      b = 0;
+      c = 0;
+      d = 1;
+    }
+  );
+  assetApi.resolve.mockReset().mockResolvedValue(null);
+  const l = createNeutralLighting();
+  l.enabled = true;
+  l.relighting = { ...createRelightingParams(), enabled: true };
+  l.asset_layers = [
+    {
+      id: "old",
+      asset_hash: "a".repeat(64),
+      media_type: "image/png",
+      target: "both",
+      placement: "front",
+      z_index: 0,
+      opacity: 1,
+      blend_mode: "normal",
+      fit: "cover",
+      required: false,
+    },
+  ];
+  const w = mount(SceneLightingPreview, {
+    props: { lighting: l, backgroundUrl: "room.png", avatarUrl: "role.png", live2d: true },
+    global: global(),
+  });
+  await flushPromises();
+  const sources = w.findAllComponents(SourceImagePresentation);
+  expect(sources).toHaveLength(2);
+  expect(sources.map((s) => s.props("surface"))).toEqual(["background", "character"]);
+  expect(sources[0].props("sceneRoot")).toBe(w.get("[data-preview-stage]").element);
+  expect(assetApi.resolve).not.toHaveBeenCalled();
+  w.unmount();
+});
 import { StaticCharacterLightingFrame, LightingOverlay } from "@/components/game/lighting";
 const assetApi = vi.hoisted(() => ({ resolve: vi.fn() }));
 vi.mock("@/api/services/scene-lighting", () => ({ resolveLightingAsset: assetApi.resolve }));
@@ -18,6 +62,53 @@ const global = () => ({
   plugins: [
     createI18n({ legacy: false, locale: "zh-CN", messages: { "zh-CN": { settings, ui } } }),
   ],
+});
+it("card relighting is a background-only source consumer with no character or resolver", async () => {
+  assetApi.resolve.mockClear();
+  const l = createNeutralLighting();
+  l.enabled = true;
+  l.relighting = { ...createRelightingParams(), enabled: true };
+  const w = mount(SceneCardLightingPreview, {
+    props: { lighting: l, background: "room.png", name: "room" },
+  });
+  await flushPromises();
+  const sources = w.findAllComponents(SourceImagePresentation);
+  expect(sources).toHaveLength(1);
+  expect(sources[0].props("surface")).toBe("background");
+  expect(w.find("[data-preview-avatar-source]").exists()).toBe(false);
+  expect(assetApi.resolve).not.toHaveBeenCalled();
+  w.unmount();
+});
+it("hidden cards suspend their owned GPU consumer and disconnect visibility observation", async () => {
+  let changed: ((entries: { isIntersecting: boolean }[]) => void) | undefined;
+  const disconnected = vi.fn();
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(callback: typeof changed) {
+        changed = callback;
+      }
+      observe() {}
+      disconnect = disconnected;
+    }
+  );
+  const l = createNeutralLighting();
+  l.enabled = true;
+  l.relighting = { ...createRelightingParams(), enabled: true };
+  const w = mount(SceneCardLightingPreview, {
+    props: { lighting: l, background: "room.png", name: "Room" },
+  });
+  await flushPromises();
+  expect(w.getComponent(SourceImagePresentation).props("visible")).toBe(false);
+  changed!([{ isIntersecting: true }]);
+  await flushPromises();
+  expect(w.getComponent(SourceImagePresentation).props("visible")).toBe(true);
+  changed!([{ isIntersecting: false }]);
+  await flushPromises();
+  expect(w.getComponent(SourceImagePresentation).props("visible")).toBe(false);
+  w.unmount();
+  expect(disconnected).toHaveBeenCalledOnce();
+  vi.unstubAllGlobals();
 });
 const filter = (element: Element) =>
   (element as HTMLElement).style.filter ||

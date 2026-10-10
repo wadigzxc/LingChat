@@ -1,5 +1,5 @@
 <template>
-  <div class="main-box" :style="{ isolation: 'isolate' }">
+  <div ref="sceneRoot" data-relighting-scene class="main-box" :style="{ isolation: 'isolate' }">
     <!-- 主界面始终渲染，加载动画期间在后台初始化 -->
     <FreeModeTools />
     <FullAccessWarning />
@@ -116,7 +116,8 @@
   // 用模块级变量兜底，确保一次启动只播放一次。
   let loadingShownThisSession = false;
 
-  const { lighting, simplified, options, resolveAsset } = provideSceneLighting();
+  const sceneRoot = ref<HTMLElement | null>(null);
+  const { lighting, simplified, options, resolveAsset } = provideSceneLighting(sceneRoot);
   const router = useRouter();
   const uiStore = useUIStore();
   const gameStore = useGameStore();

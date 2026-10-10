@@ -10,6 +10,18 @@ import type {
   SurfaceRoute,
 } from "./types";
 
+class SourceImageRenderer extends WebGLRenderer {
+  constructor() {
+    super();
+    // Exclude optional interaction only on this owned, source-only instance. The global
+    // EventTicker singleton must not reset/keep alive a borrowed model renderer's ticker.
+    this.config = {
+      ...this.config,
+      systems: this.config.systems.filter((system) => system.name !== "events"),
+    };
+  }
+}
+
 export function probeRelightingCapability(renderer: WebGLRenderer): string | null {
   const gl = renderer.gl;
   if (!gl || renderer.context.webGLVersion !== 2 || gl.isContextLost()) return "webgl-unavailable";
@@ -284,7 +296,7 @@ export async function createDomImageBinding(
         )
           return;
       }
-      owned = new WebGLRenderer();
+      owned = new SourceImageRenderer();
       const [width, height] = route.spec.sourceSizeCss;
       await owned.init({
         canvas,
@@ -297,6 +309,10 @@ export async function createDomImageBinding(
         premultipliedAlpha: true,
         preferWebGLVersion: 2,
       });
+      // This on-demand image renderer owns a bounded frame/texture set and disposes it explicitly.
+      // Pixi SchedulerSystem otherwise keeps Ticker.system spinning even without any render calls.
+      // Remove only this renderer's listener; never stop a borrowed model/shared ticker.
+      owned.scheduler.destroy();
       if (
         disposed ||
         epoch !== generation ||

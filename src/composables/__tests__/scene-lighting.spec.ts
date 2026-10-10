@@ -2,6 +2,23 @@ import { defineComponent, h, nextTick, reactive } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, expect, it, vi } from "vitest";
 import { createNeutralLighting } from "@/utils/scene-lighting/defaults";
+import { createRelightingParams } from "@/utils/scene-lighting/relighting-params";
+
+it("never resolves legacy assets on a relighting target miss and restores legacy when block disabled", async () => {
+  stores.game.activeLighting.relighting = {
+    ...createRelightingParams(),
+    enabled: true,
+    target: "character",
+  };
+  const wrapper = host();
+  await flushPromises();
+  expect(invokeMock).not.toHaveBeenCalled();
+  expect(wrapper.find("img").exists()).toBe(false);
+  stores.game.activeLighting.relighting.enabled = false;
+  await flushPromises();
+  expect(invokeMock).toHaveBeenCalledWith("resolve_lighting_asset", { hash });
+  wrapper.unmount();
+});
 import { LightingAssetStack, LightingOverlay } from "@/components/game/lighting";
 import { provideSceneLighting } from "../useSceneLighting";
 import { tauriMocks, resetTauriMocks } from "@/test/setup";

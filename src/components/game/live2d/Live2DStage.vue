@@ -4,6 +4,13 @@
     ref="host"
     class="pointer-events-none absolute inset-0 overflow-hidden"
     aria-hidden="true"
+    data-relighting-live2d
+    :data-relighting-state="lightingState.kind"
+    :data-relighting-reason="
+      lightingState.kind === 'unavailable' || lightingState.kind === 'identity'
+        ? lightingState.reason
+        : undefined
+    "
   ></div>
   <slot></slot>
 </template>
@@ -14,6 +21,16 @@
   import { onBeforeUnmount, onMounted, provide, readonly, ref, watch } from "vue";
 
   import { getLive2dFilePath } from "@/api/services/character";
+  import { useSceneLighting } from "@/composables/useSceneLighting";
+  import { bindPixiCharacterSurface } from "@/utils/scene-lighting/relighting/bindings";
+  import {
+    sceneProvider,
+    sourceMeasure,
+    observeGeometry,
+  } from "@/utils/scene-lighting/relighting/geometry";
+  import { resolveLightingRoute } from "@/utils/scene-lighting/relighting/route";
+  import { compileRelightingShaderSpec } from "@/utils/scene-lighting/relighting/math";
+  import type { RelightingBinding, AdapterState } from "@/utils/scene-lighting/relighting/types";
   import { EMOTION_CONFIG_EMO } from "@/controllers/emotion/config";
   import type { GameRole } from "@/stores/modules/game/state";
   import {
@@ -81,6 +98,43 @@
     reactionLifecycleCleanup: (() => void) | null;
   }
 
+  const lightingContext = useSceneLighting();
+  const lightingState = ref<AdapterState>({ kind: "identity", reason: "loading" });
+  let lightingBinding: RelightingBinding | null = null;
+  let stopLightingGeometry: (() => void) | null = null;
+  let lightingMutations: MutationObserver | null = null;
+  function updateLighting() {
+    if (disposed || !host.value || !lightingBinding) return;
+    const route = resolveLightingRoute(lightingContext.lighting.value);
+    const root = lightingContext.sceneRoot.value || host.value;
+    lightingBinding.update(
+      route.kind === "relighting"
+        ? compileRelightingShaderSpec(
+            route,
+            "character",
+            sceneProvider(root),
+            sourceMeasure(host.value, root),
+            "supported"
+          )
+        : route
+    );
+  }
+  function observeLighting() {
+    stopLightingGeometry?.();
+    lightingMutations?.disconnect();
+    if (disposed || !host.value || !lightingBinding) return;
+    stopLightingGeometry = observeGeometry(
+      host.value,
+      lightingContext.sceneRoot.value || host.value,
+      updateLighting
+    );
+    lightingMutations = new MutationObserver(updateLighting);
+    for (let el: HTMLElement | null = host.value; el; el = el.parentElement)
+      lightingMutations.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
+    updateLighting();
+  }
+  watch(() => lightingContext.lighting.value, updateLighting, { deep: true, flush: "post" });
+  watch(() => lightingContext.sceneRoot.value, observeLighting, { flush: "post" });
   const host = ref<HTMLDivElement | null>(null);
   let runtime: Live2dRuntime | null = null;
   let application: any = null;
@@ -151,9 +205,16 @@
   }
 
   function destroyApplication() {
+    stopLightingGeometry?.();
+    stopLightingGeometry = null;
+    lightingMutations?.disconnect();
+    lightingMutations = null;
+    lightingBinding?.dispose();
+    lightingBinding = null;
     resizeObserver?.disconnect();
     resizeObserver = null;
     if (application) {
+      application.renderer.off("resize", updateLighting);
       application.destroy({ removeView: true, releaseGlobalResources: false }, true);
       application = null;
     }
@@ -163,7 +224,9 @@
 
   async function ensureApplication() {
     if (application || !host.value || disposed) return;
-    runtime = await loadLive2dRuntime();
+    const loadedRuntime = await loadLive2dRuntime();
+    if (disposed || !host.value) return;
+    runtime = loadedRuntime;
     const app = new runtime.pixi.Application();
     await app.init({
       resizeTo: host.value,
@@ -189,6 +252,22 @@
     });
     resizeObserver.observe(host.value);
     application = app;
+    if ("gl" in app.renderer) {
+      lightingBinding = bindPixiCharacterSurface(
+        {
+          renderer: app.renderer,
+          stage: app.stage,
+          get screen() {
+            return app.screen;
+          },
+        },
+        (state) => {
+          if (!disposed) lightingState.value = state;
+        }
+      );
+    } else lightingState.value = { kind: "unavailable", reason: "webgl-unavailable" };
+    app.renderer.on("resize", updateLighting);
+    observeLighting();
   }
 
   function findParameterIndex(entry: RoleModel, parameter: string): number {
