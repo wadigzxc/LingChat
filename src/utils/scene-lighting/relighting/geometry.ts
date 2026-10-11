@@ -17,7 +17,7 @@ export function geometryReason(
   if (b !== 0 || c !== 0) return "unsupported-transform";
   return null;
 }
-function axisChain(element: HTMLElement): { x: number; y: number; reason?: string } {
+export function axisChain(element: HTMLElement): { x: number; y: number; reason?: string } {
   let x = 1,
     y = 1;
   for (let el: HTMLElement | null = element; el; el = el.parentElement) {

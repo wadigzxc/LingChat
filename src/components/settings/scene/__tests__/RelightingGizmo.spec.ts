@@ -23,6 +23,95 @@ function pointer(type: string, x: number, y: number, id = 9) {
   return event;
 }
 describe("single lamp range", () => {
+  for (const [sx, sy] of [
+    [2, 0.5],
+    [-2, 0.5],
+    [0.5, -2],
+  ]) {
+    it(`inverts signed nonuniform client deltas (${sx}, ${sy}) for center and radius`, async () => {
+      const lighting = createNeutralLighting();
+      lighting.enabled = true;
+      lighting.relighting = { ...createRelightingParams(), enabled: true };
+      lighting.relighting.point_light.radius = 0.1;
+      const stage = document.createElement("div");
+      stage.style.scale = `${sx} ${sy}`;
+      vi.spyOn(stage, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        right: 500 * Math.abs(sx),
+        bottom: 300 * Math.abs(sy),
+        width: 500 * Math.abs(sx),
+        height: 300 * Math.abs(sy),
+      } as DOMRect);
+      const w = mount(RelightingGizmo, { props: { lighting, stage } });
+      await flushPromises();
+      w.get("[data-relighting-center]").element.dispatchEvent(pointer("pointerdown", 100, 100));
+      window.dispatchEvent(pointer("pointermove", 100 + sx * 50, 100 + sy * 30));
+      const center = (w.emitted("update:lighting")![0][0] as typeof lighting).relighting!
+        .point_light;
+      expect(center.x).toBeCloseTo(lighting.relighting.point_light.x + 0.1);
+      expect(center.y).toBeCloseTo(lighting.relighting.point_light.y + 0.1);
+      window.dispatchEvent(pointer("pointerup", 100, 100));
+      w.get("[data-relighting-radius]").element.dispatchEvent(pointer("pointerdown", 100, 100));
+      window.dispatchEvent(pointer("pointermove", 100 + sx * 30, 100));
+      expect(
+        (w.emitted("update:lighting")![1][0] as typeof lighting).relighting!.point_light.radius
+      ).toBeCloseTo(0.2);
+      w.unmount();
+    });
+  }
+  it("remeasures changed ancestor scale and stops a drag when its stage is replaced", async () => {
+    const { w, lighting } = setup();
+    const stage = w.props("stage")!;
+    const parent = document.createElement("div");
+    parent.append(stage);
+    document.body.append(parent);
+    // Rebind so the observed chain includes this actual ancestor.
+    await w.setProps({ stage: undefined });
+    await w.setProps({ stage });
+    parent.style.scale = "2";
+    await flushPromises();
+    expect(parseFloat((w.get("[data-relighting-range]").element as HTMLElement).style.width)).toBe(
+      150
+    );
+    w.get("[data-relighting-center]").element.dispatchEvent(pointer("pointerdown", 100, 100));
+    const replacement = document.createElement("div");
+    vi.spyOn(replacement, "getBoundingClientRect").mockReturnValue({
+      width: 400,
+      height: 200,
+    } as DOMRect);
+    await w.setProps({ stage: replacement });
+    window.dispatchEvent(pointer("pointermove", 200, 100));
+    expect(w.emitted("update:lighting")).toBeUndefined();
+    await w.setProps({ disabled: true });
+    await w.get("[data-relighting-radius]").trigger("keydown", { key: "ArrowRight" });
+    expect(w.emitted("update:lighting")).toBeUndefined();
+    expect(lighting.relighting!.point_light.radius).toBe(0.75);
+    w.unmount();
+    parent.remove();
+  });
+  it("uses local scene CSS dimensions under global scale without multiplying twice", async () => {
+    const lighting = createNeutralLighting();
+    lighting.enabled = true;
+    lighting.relighting = { ...createRelightingParams(), enabled: true };
+    lighting.relighting.point_light.radius = 0.1;
+    const stage = document.createElement("div");
+    stage.style.scale = "2";
+    vi.spyOn(stage, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 600,
+      width: 1000,
+      height: 600,
+    } as DOMRect);
+    const w = mount(RelightingGizmo, { props: { lighting, stage } });
+    await flushPromises();
+    expect(parseFloat((w.get("[data-relighting-range]").element as HTMLElement).style.width)).toBe(
+      60
+    );
+    w.unmount();
+  });
   it("keeps minimum-radius controls separately hittable without changing the circle", async () => {
     const { w, lighting } = setup();
     lighting.relighting!.point_light.radius = 0.01;

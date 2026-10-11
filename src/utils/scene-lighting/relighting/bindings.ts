@@ -20,6 +20,22 @@ class SourceImageRenderer extends WebGLRenderer {
       systems: this.config.systems.filter((system) => system.name !== "events"),
     };
   }
+
+  /** Pixi's destroy runner stops on the first uninitialized system that throws. */
+  destroyPartial() {
+    const destroy = this.runners.destroy;
+    for (const system of [...destroy.items].reverse()) {
+      try {
+        system.destroy(false);
+      } catch {
+        // A partial system must not prevent the other owned systems/pipes releasing.
+      } finally {
+        destroy.remove(system);
+      }
+    }
+    // Finish Pixi's normal runner/reference teardown, without releasing global caches.
+    super.destroy();
+  }
 }
 
 export function probeRelightingCapability(renderer: WebGLRenderer): string | null {
@@ -118,7 +134,7 @@ export async function createDomImageBinding(
     disposed = false,
     initializing = false,
     lost = false;
-  let renderer: WebGLRenderer | null = null,
+  let renderer: SourceImageRenderer | null = null,
     stage: Container | null = null,
     filter: RelightingFilter | null = null;
   let dormant: {
@@ -127,9 +143,16 @@ export async function createDomImageBinding(
     loss: Promise<void>;
   } | null = null;
   const pendingWaits = new Set<() => void>();
-  const retire = (owned: WebGLRenderer) => {
-    const gl = owned.gl,
-      extension = owned.context.extensions.loseContext ?? gl.getExtension("WEBGL_lose_context");
+  const retire = (owned: SourceImageRenderer, partial = false) => {
+    // Scheduler init precedes GL init in Pixi. Remove only this owned listener first,
+    // including when init rejected before a context existed (destroy is idempotent).
+    owned.scheduler?.destroy();
+    const gl = owned.gl;
+    if (partial || !gl) {
+      owned.destroyPartial();
+      return;
+    }
+    const extension = owned.context.extensions.loseContext ?? gl.getExtension("WEBGL_lose_context");
     if (disposed) {
       owned.destroy();
       return;
@@ -282,7 +305,7 @@ export async function createDomImageBinding(
     initializing = true;
     const epoch = generation,
       token = frame.requestToken;
-    let owned: WebGLRenderer | null = null;
+    let owned: SourceImageRenderer | null = null;
     try {
       if (dormant) {
         const gl = dormant;
@@ -328,11 +351,8 @@ export async function createDomImageBinding(
       draw();
     } catch (error) {
       if (owned) {
-        try {
-          retire(owned);
-        } catch {
-          /* Partial init has no complete renderer system graph. */
-        }
+        retire(owned, true);
+        owned = null;
       }
       if (!disposed && epoch === generation)
         emit({

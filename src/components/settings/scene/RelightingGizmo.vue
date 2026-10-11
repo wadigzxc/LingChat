@@ -1,6 +1,7 @@
 <script setup lang="ts">
   import { computed, ref, onMounted, onScopeDispose, watch } from "vue";
   import type { LightingParams } from "@/types/scene-lighting";
+  import { axisChain, sceneProvider } from "@/utils/scene-lighting/relighting/geometry";
   const props = defineProps<{
     lighting: LightingParams;
     stage?: HTMLElement;
@@ -9,8 +10,8 @@
   const emit = defineEmits<{ "update:lighting": [LightingParams] }>();
   const size = ref({ width: 0, height: 0 });
   function measure() {
-    const r = props.stage?.getBoundingClientRect();
-    size.value = { width: r?.width ?? 0, height: r?.height ?? 0 };
+    const [width, height] = props.stage ? sceneProvider(props.stage).sizeCss : [0, 0];
+    size.value = { width, height };
   }
   const radiusPx = computed(
     () =>
@@ -34,11 +35,18 @@
     };
   });
   let observer: ResizeObserver | undefined;
+  let mutations: MutationObserver | undefined;
   watch(
     () => props.stage,
     (stage) => {
       observer?.disconnect();
+      mutations?.disconnect();
       measure();
+      if (stage) {
+        mutations = new MutationObserver(measure);
+        for (let element: HTMLElement | null = stage; element; element = element.parentElement)
+          mutations.observe(element, { attributes: true, attributeFilter: ["class", "style"] });
+      }
       if (stage && typeof ResizeObserver !== "undefined") {
         observer = new ResizeObserver(measure);
         observer.observe(stage);
@@ -62,6 +70,7 @@
     if (previous?.element.hasPointerCapture?.(previous.id))
       previous.element.releasePointerCapture(previous.id);
   }
+  watch(() => props.stage, stop, { flush: "sync" });
   function start(event: PointerEvent, radius = false) {
     if (props.disabled || !props.lighting.relighting?.point_light.enabled || event.button > 0)
       return;
@@ -91,16 +100,18 @@
   }
   function move(event: PointerEvent) {
     if (!drag || event.pointerId !== drag.id || props.disabled || !props.stage) return;
-    const r = props.stage.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return;
+    const scale = axisChain(props.stage);
+    const [width, height] = sceneProvider(props.stage).sizeCss;
+    if (scale.reason || width <= 0 || height <= 0) {
+      stop();
+      return;
+    }
+    const dx = (event.clientX - drag.clientX) / scale.x;
+    const dy = (event.clientY - drag.clientY) / scale.y;
     if (drag.radius) {
-      // Relative horizontal motion keeps an inset/out-of-range handle from jumping.
-      setRadius(drag.value + (event.clientX - drag.clientX) / Math.min(r.width, r.height));
-    } else
-      update(
-        drag.x + (event.clientX - drag.clientX) / r.width,
-        drag.y + (event.clientY - drag.clientY) / r.height
-      );
+      // Relative scene-local motion preserves pickup and the shader's short-side units.
+      setRadius(drag.value + dx / Math.min(width, height));
+    } else update(drag.x + dx / width, drag.y + dy / height);
   }
   function end(event: PointerEvent) {
     if (event.pointerId === drag?.id) stop();
@@ -142,6 +153,7 @@
   onScopeDispose(() => {
     stop();
     observer?.disconnect();
+    mutations?.disconnect();
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", end);
     window.removeEventListener("pointercancel", end);

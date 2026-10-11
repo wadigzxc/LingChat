@@ -45,6 +45,94 @@
   const state = shallowRef<AdapterState>({ kind: "identity", reason: "loading" });
   let stopObserve: (() => void) | undefined;
   let mutations: MutationObserver | null = null;
+  let stopActivity: (() => void) | undefined;
+  let disposed = false;
+  // Layout transitions emit no per-frame mutations. Own a clock only while CSS is active.
+  function observeActivity(elements: Set<HTMLElement>) {
+    const activities = new Map<HTMLElement, Map<string, number>>();
+    let raf: number | undefined;
+    let stopped = false;
+    const stopFrame = () => {
+      if (raf !== undefined) cancelAnimationFrame(raf);
+      raf = undefined;
+    };
+    const tick = () => {
+      raf = undefined;
+      if (stopped) return;
+      const now = performance.now();
+      for (const [element, entries] of activities) {
+        for (const [key, deadline] of entries) if (now >= deadline) entries.delete(key);
+        if (!entries.size) activities.delete(element);
+      }
+      measure();
+      if (activities.size) raf = requestAnimationFrame(tick);
+    };
+    const handle = (event: Event) => {
+      const element = event.currentTarget as HTMLElement;
+      if (event.target !== element || stopped) return;
+      const animation = event.type.startsWith("animation");
+      const detail = event as TransitionEvent & AnimationEvent;
+      const key = `${animation ? "a" : "t"}:${animation ? detail.animationName : detail.propertyName}:${detail.pseudoElement || ""}`;
+      const ending = event.type.endsWith("end") || event.type.endsWith("cancel");
+      if (ending) {
+        const entries = activities.get(element);
+        entries?.delete(key);
+        if (!entries?.size) activities.delete(element);
+        measure(); // End/cancel must include the final compositor position.
+        if (!activities.size) stopFrame();
+        return;
+      }
+      let entries = activities.get(element);
+      if (!entries) activities.set(element, (entries = new Map()));
+      if (!entries.has(key)) {
+        const css = getComputedStyle(element);
+        const times = (value: string) =>
+          value.split(",").map((v) => parseFloat(v) * (v.trim().endsWith("ms") ? 1 : 1000) || 0);
+        const durations = times(animation ? css.animationDuration : css.transitionDuration);
+        const delays = times(animation ? css.animationDelay : css.transitionDelay);
+        const names = (animation ? css.animationName : css.transitionProperty)
+          .split(",")
+          .map((v) => v.trim());
+        const iterations = css.animationIterationCount.split(",").map(Number);
+        const name = animation ? detail.animationName : detail.propertyName;
+        let budget = 0;
+        names.forEach((n, i) => {
+          if (n !== name && n !== "all") return;
+          const count = animation ? iterations[i % iterations.length] : 1;
+          budget = Math.max(
+            budget,
+            durations[i % durations.length] * count + delays[i % delays.length]
+          );
+        });
+        // Missing events/infinite animations must never leave an unbounded poller.
+        entries.set(
+          key,
+          performance.now() +
+            Math.min(60000, Number.isFinite(budget) ? Math.max(0, budget) + 250 : 60000)
+        );
+      }
+      measure();
+      if (raf === undefined) raf = requestAnimationFrame(tick);
+    };
+    const events = [
+      "transitionrun",
+      "transitionstart",
+      "transitionend",
+      "transitioncancel",
+      "animationstart",
+      "animationend",
+      "animationcancel",
+    ];
+    for (const element of elements)
+      for (const event of events) element.addEventListener(event, handle);
+    return () => {
+      stopped = true;
+      stopFrame();
+      activities.clear();
+      for (const element of elements)
+        for (const event of events) element.removeEventListener(event, handle);
+    };
+  }
   function measure() {
     if (!host.value) return;
     const lightingRoute = resolveLightingRoute(props.lighting);
@@ -82,16 +170,20 @@
   function observe() {
     stopObserve?.();
     mutations?.disconnect();
+    stopActivity?.();
+    if (disposed) return;
     if (host.value) {
       mutations = new MutationObserver(() => {
         if (controller.value) receive(controller.value.getFrame());
       });
-      for (
-        let ancestor: HTMLElement | null = host.value;
-        ancestor;
-        ancestor = ancestor.parentElement
-      )
+      const elements = new Set<HTMLElement>();
+      for (const start of [host.value, props.sceneRoot]) {
+        for (let ancestor = start; ancestor; ancestor = ancestor.parentElement)
+          elements.add(ancestor);
+      }
+      for (const ancestor of elements)
         mutations.observe(ancestor, { attributes: true, attributeFilter: ["class", "style"] });
+      stopActivity = observeActivity(elements);
     }
     if (host.value)
       stopObserve = observeGeometry(host.value, props.sceneRoot || host.value, () => {
@@ -103,6 +195,7 @@
   watch(
     () => props.sceneRoot,
     async () => {
+      stopActivity?.();
       await nextTick();
       observe();
     }
@@ -116,6 +209,8 @@
     { deep: true, flush: "post" }
   );
   onBeforeUnmount(() => {
+    disposed = true;
+    stopActivity?.();
     stopObserve?.();
     mutations?.disconnect();
   });
