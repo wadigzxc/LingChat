@@ -2,6 +2,8 @@
   import { computed, ref, onMounted, onScopeDispose, watch } from "vue";
   import type { LightingParams } from "@/types/scene-lighting";
   import { axisChain, sceneProvider } from "@/utils/scene-lighting/relighting/geometry";
+  import { useI18n } from "vue-i18n";
+  const { t } = useI18n();
   const props = defineProps<{
     lighting: LightingParams;
     stage?: HTMLElement;
@@ -176,8 +178,8 @@
     ></div>
     <button
       data-relighting-radius
-      aria-label="单灯范围，方向键微调"
-      title="左右拖动调整范围；方向键微调"
+      :aria-label="t('settings.lighting.relighting.radiusHandleAria')"
+      :title="t('settings.lighting.relighting.radiusHandleHint')"
       :disabled="disabled"
       @pointerdown.prevent.stop="start($event, true)"
       @lostpointercapture="stop"
@@ -189,7 +191,7 @@
     </button>
     <button
       data-relighting-center
-      aria-label="单灯位置，方向键微调"
+      :aria-label="t('settings.lighting.relighting.centerHandleAria')"
       :disabled="disabled"
       @pointerdown.prevent.stop="start"
       @lostpointercapture="stop"

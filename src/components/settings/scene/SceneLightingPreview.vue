@@ -37,7 +37,18 @@
       CSS.supports("mix-blend-mode", "plus-lighter"),
   };
   const stage = ref<HTMLElement>();
-  const sourceStatus = ref("");
+  const sourceFailures = ref<string[]>([]);
+  const sourceLoading = ref(false);
+  // Translate at render time so a pending source also follows runtime locale changes.
+  const sourceStatus = computed(() =>
+    sourceFailures.value.length
+      ? t("settings.lighting.relighting.sourceUnavailable", {
+          reasons: sourceFailures.value.join("; "),
+        })
+      : sourceLoading.value
+        ? text("relighting.loadingPreview", "正在加载预览…")
+        : ""
+  );
   let statusObserver: MutationObserver | undefined;
   function readStatus() {
     const sources = Array.from(
@@ -49,11 +60,9 @@
         (reason) => reason && !["target-miss", "disabled", "legacy", "hidden"].includes(reason)
       );
     const failures = reasons.filter((reason) => reason !== "loading");
-    sourceStatus.value = failures.length
-      ? `受光不可用，显示原图：${Array.from(new Set(failures)).join("；")}`
-      : sources.some((el) => el.dataset.sourceLoading === "true") || reasons.includes("loading")
-        ? "正在加载预览…"
-        : "";
+    sourceFailures.value = Array.from(new Set(failures)) as string[];
+    sourceLoading.value =
+      sources.some((el) => el.dataset.sourceLoading === "true") || reasons.includes("loading");
   }
   onMounted(() => {
     statusObserver = new MutationObserver(readStatus);
@@ -203,7 +212,12 @@
     </p>
     <div class="flex items-center justify-between gap-3 text-sm text-white/80">
       <p data-preview-status role="status" class="text-xs">
-        {{ !avatarSrc ? "无角色立绘 · 仅预览背景" : live2d ? "静态立绘预览" : "场景预览"
+        {{
+          !avatarSrc
+            ? text("relighting.backgroundPreview", "无角色立绘 · 仅预览背景")
+            : live2d
+              ? text("relighting.staticPreview", "静态立绘预览")
+              : text("relighting.scenePreview", "场景预览")
         }}{{ sourceStatus ? ` · ${sourceStatus}` : "" }}
       </p>
       <button

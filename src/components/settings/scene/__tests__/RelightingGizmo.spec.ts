@@ -1,4 +1,9 @@
 import { mount, flushPromises } from "@vue/test-utils";
+import { createI18n } from "vue-i18n";
+import zhCN from "@/locales/zh-CN";
+function localeOptions() {
+  return { plugins: [createI18n({ legacy: false, locale: "zh-CN", messages: { "zh-CN": zhCN } })] };
+}
 import { describe, it, expect, vi } from "vitest";
 import RelightingGizmo from "../RelightingGizmo.vue";
 import { createNeutralLighting } from "@/utils/scene-lighting/defaults";
@@ -14,7 +19,7 @@ function setup() {
     width: 400,
     height: 200,
   } as DOMRect);
-  const w = mount(RelightingGizmo, { props: { lighting, stage } });
+  const w = mount(RelightingGizmo, { props: { lighting, stage }, global: localeOptions() });
   return { w, lighting };
 }
 function pointer(type: string, x: number, y: number, id = 9) {
@@ -43,7 +48,7 @@ describe("single lamp range", () => {
         width: 500 * Math.abs(sx),
         height: 300 * Math.abs(sy),
       } as DOMRect);
-      const w = mount(RelightingGizmo, { props: { lighting, stage } });
+      const w = mount(RelightingGizmo, { props: { lighting, stage }, global: localeOptions() });
       await flushPromises();
       w.get("[data-relighting-center]").element.dispatchEvent(pointer("pointerdown", 100, 100));
       window.dispatchEvent(pointer("pointermove", 100 + sx * 50, 100 + sy * 30));
@@ -105,7 +110,7 @@ describe("single lamp range", () => {
       width: 1000,
       height: 600,
     } as DOMRect);
-    const w = mount(RelightingGizmo, { props: { lighting, stage } });
+    const w = mount(RelightingGizmo, { props: { lighting, stage }, global: localeOptions() });
     await flushPromises();
     expect(parseFloat((w.get("[data-relighting-range]").element as HTMLElement).style.width)).toBe(
       60

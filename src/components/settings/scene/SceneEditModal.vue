@@ -49,7 +49,7 @@
               <fieldset data-editor-fields :disabled="saving || !!pendingAction" class="space-y-4">
                 <RelightingPanel :model-value="lighting" @update:model-value="updateLighting" />
                 <details open>
-                  <summary>场景信息</summary>
+                  <summary>{{ text("relighting.sceneInfo", "场景信息") }}</summary>
                   <!-- 场景名称 -->
                   <section>
                     <label
@@ -130,7 +130,7 @@
                   </section>
                 </details>
                 <details data-legacy-lighting>
-                  <summary>光影与预设</summary>
+                  <summary>{{ text("relighting.presetsTitle", "光影与预设") }}</summary>
                   <LightingPresetSelect
                     draft-only
                     :active-preset-id="draft.lighting_preset_id"
@@ -218,7 +218,7 @@
                   class="rounded-lg border border-white/20 px-3 py-2 text-sm text-white/80
                     disabled:opacity-50"
                 >
-                  重置单灯受光
+                  {{ text("relighting.reset", "重置单灯受光") }}
                 </button>
                 <button
                   data-restore-neutral
