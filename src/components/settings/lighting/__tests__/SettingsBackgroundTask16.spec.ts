@@ -113,6 +113,19 @@ beforeEach(() => {
   );
 });
 describe("Task16 background settings DOM", () => {
+  it("keeps card artwork isolated and exposes the edit control on keyboard focus", async () => {
+    const w = await openPage();
+    const card = w.get('[data-scene-card="scene-1"]');
+    const preview = card.findComponent({ name: "SceneCardLightingPreview" });
+    expect(preview.classes()).toContain("isolate");
+    expect(preview.classes()).toContain("pointer-events-none");
+    const edit = card.get("button");
+    expect(edit.classes()).toContain("focus-visible:opacity-100");
+    await edit.trigger("click");
+    expect(w.findComponent({ name: "SceneEditModal" }).props("show")).toBe(true);
+    expect(calls("select_scene")).toHaveLength(0);
+    w.unmount();
+  });
   it("names the section scene and lighting settings", async () => {
     const w = await openPage();
     expect(w.get("h2").text()).toBe("场景及光影设置");

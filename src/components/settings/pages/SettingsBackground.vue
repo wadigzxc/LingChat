@@ -117,7 +117,9 @@
           <button
             v-if="!scene.source || scene.source === 'game'"
             class="absolute top-2 right-2 z-10 rounded-lg bg-black/50 p-1.5 text-white/60 opacity-0
-              transition-all group-hover:opacity-100 hover:bg-black/70 hover:text-white"
+              transition-all group-hover:opacity-100 hover:bg-black/70 hover:text-white
+              focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2
+              focus-visible:outline-sky-300"
             @click.stop="handleWrenchClick(scene)"
             :title="$t('settings.background.scene.edit')"
           >

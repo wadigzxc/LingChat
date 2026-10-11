@@ -30,7 +30,7 @@
         :checked="block.enabled"
         @change="update((b) => (b.enabled = ($event.target as HTMLInputElement).checked))"
       />
-      单灯受光</label
+      单灯受光（支持 Live2D 模型）</label
     >
     <p class="hint">仅照亮背景与角色，界面不受影响。停用后恢复旧光影。</p>
     <div v-if="block.enabled" class="controls">

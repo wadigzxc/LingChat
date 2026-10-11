@@ -130,7 +130,7 @@
                   </section>
                 </details>
                 <details data-legacy-lighting>
-                  <summary>旧光影与预设</summary>
+                  <summary>光影与预设</summary>
                   <LightingPresetSelect
                     draft-only
                     :active-preset-id="draft.lighting_preset_id"

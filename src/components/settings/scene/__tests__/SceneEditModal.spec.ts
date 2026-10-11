@@ -65,6 +65,12 @@ beforeEach(() => {
   roleFixture.gameRoles = {};
 });
 describe("scene editor draft", () => {
+  it("names lighting presets and explicitly includes Live2D support without exclusivity", async () => {
+    const w = await open();
+    expect(w.get("[data-legacy-lighting] summary").text()).toBe("光影与预设");
+    expect(w.get(".relighting-panel .enable").text()).toBe("单灯受光（支持 Live2D 模型）");
+    w.unmount();
+  });
   for (const failure of [false, true])
     it(`settles a pending save after unmount without late UI effects (${failure})`, async () => {
       let settle!: () => void;

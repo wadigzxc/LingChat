@@ -38,7 +38,7 @@
   });
 </script>
 <template>
-  <div ref="root" class="relative aspect-video overflow-hidden">
+  <div ref="root" class="pointer-events-none relative isolate aspect-video overflow-hidden">
     <SourceImagePresentation
       v-if="background && sourceOnly"
       data-card-background-source
