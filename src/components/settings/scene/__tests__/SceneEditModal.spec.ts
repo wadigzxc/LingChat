@@ -368,7 +368,7 @@ describe("scene editor draft", () => {
     expect(w.text()).toContain("Existing hashes only");
   });
   it("localizes built-in provenance names and new editor status strings through fallback keys", async () => {
-    const p = preset({ kind: "built_in", i18n_key: "lighting.presets.moon" });
+    const p = preset({ kind: "built_in", i18n_key: "lighting.presets.moonlight" });
     api.list.mockResolvedValue([p]);
     const language = createI18n({
       legacy: false,
@@ -377,7 +377,7 @@ describe("scene editor draft", () => {
       fallbackWarn: false,
       messages: {
         en: {
-          lighting: { presets: { moon: "Localized moon" } },
+          lighting: { presets: { moonlight: "Localized moon" } },
           settings: {
             lighting: {
               basedOn: "Based on",

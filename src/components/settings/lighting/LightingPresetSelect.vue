@@ -18,7 +18,12 @@
   const sort = ref<PresetSort>("favorite_first");
   const visible = computed(() =>
     presets.value
-      .filter((p) => matchesLightingPreset(p, query.value, displayName(p)))
+      .filter((p) =>
+        matchesLightingPreset(p, query.value, displayName(p), [
+          presetDescription(p),
+          ...presetClassifications(p),
+        ])
+      )
       .sort((a, b) => {
         if (sort.value === "favorite_first" && a.favorite !== b.favorite)
           return Number(b.favorite) - Number(a.favorite);
@@ -47,7 +52,9 @@
     return result;
   }
   import { useLightingOperation } from "./useLightingOperation";
+  import { useLightingText } from "./useLightingText";
   const { pending, run, text, presetName: displayName } = useLightingOperation();
+  const { presetClassifications, presetDescription } = useLightingText();
   async function load() {
     presets.value = await listLightingPresets("favorite_first");
     emit("loaded", JSON.parse(JSON.stringify(presets.value)));
@@ -124,20 +131,29 @@
             class="h-3 w-3 rounded-full"
             :style="{ backgroundColor: preset.lighting.main_light.color_start }"
           ></span>
-          <span
-            v-for="(text, index) in [
-              displayName(preset),
-              ...preset.aliases,
-              ...preset.tags,
-              preset.description,
-            ]"
-            :key="index"
+          <span data-preset-name>
+            <template v-for="(part, i) in parts(displayName(preset))" :key="i">
+              <mark v-if="part.match">{{ part.text }}</mark
+              ><span v-else>{{ part.text }}</span>
+            </template>
+          </span>
+          <span data-preset-description class="w-full text-sm text-white/70">
+            <template v-for="(part, i) in parts(presetDescription(preset))" :key="i">
+              <mark v-if="part.match">{{ part.text }}</mark
+              ><span v-else>{{ part.text }}</span>
+            </template>
+          </span>
+          <small
+            v-for="classification in presetClassifications(preset)"
+            :key="classification"
+            data-preset-classification
+            class="rounded bg-white/10 px-2 py-0.5"
           >
-            <template v-for="(part, i) in parts(text)" :key="i"
-              ><mark v-if="part.match">{{ part.text }}</mark
-              ><span v-else>{{ part.text }}</span></template
-            > </span
-          ><small>{{ preset.category }}</small>
+            <template v-for="(part, i) in parts(classification)" :key="i">
+              <mark v-if="part.match">{{ part.text }}</mark
+              ><span v-else>{{ part.text }}</span>
+            </template>
+          </small>
         </button>
       </div>
     </details>

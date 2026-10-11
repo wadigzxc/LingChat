@@ -56,7 +56,7 @@ function options() {
           "zh-CN": {
             settings: { background: { scene: { title: "场景管理" } } },
             nav: { background: "背景" },
-            builtin: { moon: "月夜" },
+            lighting: { presets: { moonlight: "月夜" } },
           },
         },
       }),
@@ -239,7 +239,7 @@ describe("Task16 background settings DOM", () => {
       preset({
         id: "builtin:moonlight",
         kind: "built_in",
-        i18n_key: "builtin.moon",
+        i18n_key: "lighting.presets.moonlight",
         name: "Moon raw",
       }),
       preset({ name: "原文 User ✦" }),

@@ -360,10 +360,12 @@ describe("LightingPresetManager DOM", () => {
   });
   it("uses the translated builtin name for the library and save-as draft", async () => {
     invokeMock.mockResolvedValue([
-      preset({ kind: "built_in", id: "builtin:moon", i18n_key: "lighting.moon" }),
+      preset({ kind: "built_in", id: "builtin:moon", i18n_key: "lighting.presets.moonlight" }),
     ]);
     const global = globalOptions();
-    global.plugins[0].global.setLocaleMessage("zh-CN", { lighting: { moon: "月夜" } });
+    global.plugins[0].global.setLocaleMessage("zh-CN", {
+      lighting: { presets: { moonlight: "月夜" } },
+    });
     const w = mount(LightingPresetManager, { global });
     await flushPromises();
     expect(w.get('[data-row="builtin:moon"]').text()).toContain("月夜");

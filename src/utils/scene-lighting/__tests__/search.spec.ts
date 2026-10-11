@@ -7,8 +7,19 @@ it("searches displayed name, aliases, tags and description with case insensitive
     aliases: ["Cold Backlight"],
     tags: ["CINEMATIC", "逆光"],
     description: "室内柔光 soft mood",
+    category: "raw-category-only",
   };
-  for (const query of ["moonLIGHT", "  BACKlight  ", "cinematic", "SOFT", "月", "柔光", "逆光", ""])
+  for (const query of [
+    "moonLIGHT",
+    "  BACKlight  ",
+    "cinematic",
+    "SOFT",
+    "月",
+    "柔光",
+    "逆光",
+    " raw-CATEGORY ",
+    "",
+  ])
     expect(matchesLightingPreset(preset, query)).toBe(true);
   expect(matchesLightingPreset(preset, "warm")).toBe(false);
   expect(matchesLightingPreset(preset, "translated", "Translated Name")).toBe(true);

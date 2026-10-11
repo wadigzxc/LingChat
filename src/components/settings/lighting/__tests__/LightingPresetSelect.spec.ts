@@ -41,18 +41,58 @@ describe("LightingPresetSelect DOM", () => {
     for (const query of ["Moon", "NIGHT", "cool", "evening", "<img"]) {
       await w.get("[data-search]").setValue(query);
       expect(w.findAll("[data-preset]")).toHaveLength(1);
-      expect(
-        w
-          .get('[data-preset="user:one"]')
-          .findAll("mark")
-          .map((m) => m.text())
-          .join("")
-          .toLowerCase()
-      ).toContain(query.toLowerCase());
+      const row = w.get('[data-preset="user:one"]');
+      if (query === "NIGHT") {
+        // Aliases remain searchable metadata, not visible or highlighted row content.
+        expect(row.text()).not.toContain("Night");
+        expect(row.findAll("mark")).toHaveLength(0);
+      } else {
+        expect(
+          row
+            .findAll("mark")
+            .map((m) => m.text())
+            .join("")
+            .toLowerCase()
+        ).toContain(query.toLowerCase());
+      }
     }
     expect(w.find("img").exists()).toBe(false);
     await w.get("[data-search]").setValue("missing");
     expect(w.findAll("[data-preset]")).toHaveLength(0);
+  });
+  it("shows a single name and stable nonblank category-first classifications without changing metadata", async () => {
+    const item = preset({
+      aliases: ["Moon", "Moon alias"],
+      category: " cinematic ",
+      tags: ["CINEMATIC", " cool ", "Cool", "", "   ", "Custom tag", "custom TAG"],
+    });
+    const before = JSON.stringify(item);
+    invokeMock.mockResolvedValue([item]);
+    const w = mount(LightingPresetSelect, { global: globalOptions() });
+    await flushPromises();
+    const row = w.get("[data-preset]");
+    expect(row.text().match(/Moon/g)).toHaveLength(1);
+    expect(row.findAll("[data-preset-classification]").map((chip) => chip.text())).toEqual([
+      "cinematic",
+      "cool",
+      "Custom tag",
+    ]);
+    expect(row.get("[data-preset-name]").text()).toBe("Moon");
+    expect(row.get("[data-preset-description]").text()).toBe("Soft evening");
+    expect(JSON.stringify(item)).toBe(before);
+    w.unmount();
+  });
+  it("searches raw category-only metadata and safely highlights the visible category", async () => {
+    invokeMock.mockResolvedValue([
+      preset({ category: "<img custom category>", tags: [], aliases: [] }),
+    ]);
+    const w = mount(LightingPresetSelect, { global: globalOptions() });
+    await flushPromises();
+    await w.get("[data-search]").setValue(" <IMG ");
+    expect(w.findAll("[data-preset]")).toHaveLength(1);
+    expect(w.get("[data-preset-classification] mark").text()).toBe("<img");
+    expect(w.find("img").exists()).toBe(false);
+    w.unmount();
   });
   it("orders options by favorites recent use and name without mutating inputs", async () => {
     const items = [
@@ -117,10 +157,12 @@ describe("LightingPresetSelect DOM", () => {
   });
   it("uses localized builtin display names for rendering and search", async () => {
     invokeMock.mockResolvedValue([
-      preset({ kind: "built_in", i18n_key: "lighting.moon", name: "Moon" }),
+      preset({ kind: "built_in", i18n_key: "lighting.presets.moonlight", name: "Moon" }),
     ]);
     const global = globalOptions();
-    global.plugins[0].global.setLocaleMessage("zh-CN", { lighting: { moon: "月夜" } });
+    global.plugins[0].global.setLocaleMessage("zh-CN", {
+      lighting: { presets: { moonlight: "月夜" } },
+    });
     const w = mount(LightingPresetSelect, { global });
     await flushPromises();
     expect(w.get("[data-preset]").text()).toContain("月夜");

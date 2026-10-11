@@ -1,18 +1,28 @@
 import type { LightingPreset } from "@/types/scene-lighting";
 
-type SearchablePreset = Pick<LightingPreset, "name" | "aliases" | "tags" | "description">;
+type SearchablePreset = Pick<
+  LightingPreset,
+  "name" | "aliases" | "tags" | "description" | "category"
+>;
 
-/** Display name is provided by the i18n host; no locale/store dependencies here. */
+/** Localized display fields come from the host; raw hidden metadata stays searchable. */
 export function matchesLightingPreset(
   preset: Readonly<SearchablePreset>,
   query: string,
-  displayName?: string
+  displayName?: string,
+  displayMetadata: readonly string[] = []
 ): boolean {
   const needle = query.trim().toLowerCase();
   return (
     !needle ||
-    [preset.name, displayName ?? "", ...preset.aliases, ...preset.tags, preset.description].some(
-      (value) => value.toLowerCase().includes(needle)
-    )
+    [
+      preset.name,
+      displayName ?? "",
+      ...displayMetadata,
+      ...preset.aliases,
+      ...preset.tags,
+      preset.description,
+      preset.category,
+    ].some((value) => value.toLowerCase().includes(needle))
   );
 }
