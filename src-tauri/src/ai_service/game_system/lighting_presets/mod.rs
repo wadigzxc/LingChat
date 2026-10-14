@@ -1,4 +1,5 @@
 mod builtins;
+mod catalog;
 mod model;
 mod store;
 
@@ -10,3 +11,6 @@ pub use store::LightingPresetStore;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod favorites_tests;

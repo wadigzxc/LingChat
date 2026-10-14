@@ -146,6 +146,23 @@ pub async fn update_lighting_preset(
     store.update(&id, update).await.map_err(error_text)
 }
 
+pub(crate) async fn favorite_preset_in_store(
+    store: &LightingPresetStore,
+    id: &str,
+    favorite: bool,
+) -> Result<LightingPreset, String> {
+    store.set_favorite(id, favorite).await.map_err(error_text)
+}
+
+#[tauri::command]
+pub async fn set_lighting_preset_favorite(
+    id: String,
+    favorite: bool,
+    store: State<'_, LightingPresetStore>,
+) -> Result<LightingPreset, String> {
+    favorite_preset_in_store(&store, &id, favorite).await
+}
+
 #[tauri::command]
 pub async fn delete_lighting_preset(
     id: String,

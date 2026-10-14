@@ -6,7 +6,8 @@
 - 仓库：G:/Lingchat/LingChat；分支：feat/846-scene-lighting-v1。
 - 冻结HEAD：`6bf48118cc2ff2104c8b7f364c8f614397774005`。初始工作区仅未跟踪`.hermes/issues/`，保持原样且不暂存。
 - 新批次任务编号独立于#846和#874；旧版原生画质与性能验收仍未关闭，不以新方案替代。
-- 本轮只执行Task 1。Task 2–10仅规划，不实现。每Task独立测试、父代理复验及显式白名单本地提交；不push/PR/reset/clean。
+- Task 1 已完成并本地提交；用户现已授权只执行 Task 2。Task 3–10 仍待开发。每 Task 独立测试、父代理复验及显式白名单本地提交；不 push/PR/reset/clean。
+- Task 2 开发基线：`55836d5954018f00784dafc286a1356928ff7e07`；收藏操作/持久化/API 契约冻结于 `C:/Users/INTRIGUED/lingchat-2p5d-v1/presets-ux-followup/task2/TASK2-CONTRACT.md`。
 - 不操作用户native窗口，不连接用户CDP49193，不终止用户进程、不改当前测试包、正式数据或凭据。
 
 ## 规模估算（非实际diff）

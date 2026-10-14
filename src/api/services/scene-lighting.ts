@@ -30,6 +30,10 @@ export function updateLightingPreset(
   return invoke<LightingPreset>("update_lighting_preset", { id, update });
 }
 
+export function setLightingPresetFavorite(id: string, favorite: boolean): Promise<LightingPreset> {
+  return invoke<LightingPreset>("set_lighting_preset_favorite", { id, favorite });
+}
+
 export function deleteLightingPreset(id: string): Promise<boolean> {
   return invoke<boolean>("delete_lighting_preset", { id });
 }

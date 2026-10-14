@@ -17,6 +17,7 @@ import {
   resolveLightingAsset,
   restoreSceneLighting,
   saveActiveLightingAsSceneDefault,
+  setLightingPresetFavorite,
   updateLightingPreset,
 } from "@/api/services/scene-lighting";
 import {
@@ -30,6 +31,34 @@ import { lighting, scene } from "@/test/scene-lighting-fixtures";
 describe("scene lighting command wrappers", () => {
   beforeEach(() => invoke.mockClear());
 
+  it.each([true, false])(
+    "forwards the explicit favorite target %s and returns the complete command DTO",
+    async (favorite) => {
+      const dto = {
+        id: "builtin:neutral",
+        kind: "built_in",
+        favorite,
+        revision: 7,
+        lighting: lighting(),
+        origin_id: "builtin:neutral",
+        name: "Neutral",
+        i18n_key: "lighting.presets.neutral",
+        description: "",
+        aliases: [],
+        tags: [],
+        category: "neutral",
+        last_used_at: null,
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      };
+      invoke.mockResolvedValueOnce(dto);
+      const result = await setLightingPresetFavorite("builtin:neutral", favorite);
+      expect(invoke.mock.calls).toEqual([
+        ["set_lighting_preset_favorite", { id: "builtin:neutral", favorite }],
+      ]);
+      expect(result).toBe(dto);
+    }
+  );
   it("forwards explicit default intent without adding it to legacy ordinary edits", async () => {
     const ordinary: UpdateSceneRequest = {
       id: "captured",

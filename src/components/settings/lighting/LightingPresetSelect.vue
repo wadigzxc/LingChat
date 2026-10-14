@@ -1,6 +1,10 @@
 <script setup lang="ts">
   import { ref, onMounted, computed, watch } from "vue";
-  import { listLightingPresets, applyLightingPreset } from "@/api/services/scene-lighting";
+  import {
+    listLightingPresets,
+    applyLightingPreset,
+    setLightingPresetFavorite,
+  } from "@/api/services/scene-lighting";
   import type { LightingPreset, PresetSort } from "@/types/scene-lighting";
   import { matchesLightingPreset } from "@/utils/scene-lighting/search";
   const props = defineProps<{
@@ -11,6 +15,7 @@
   const emit = defineEmits<{
     select: [preset: LightingPreset];
     loaded: [presets: LightingPreset[]];
+    favoriteChanged: [];
   }>();
   const presets = ref<LightingPreset[]>([]);
 
@@ -51,13 +56,29 @@
     result.push({ text: text.slice(start), match: false });
     return result;
   }
-  import { useLightingOperation } from "./useLightingOperation";
+  import { useLightingCatalogOperation } from "./useLightingCatalogOperation";
   import { useLightingText } from "./useLightingText";
-  const { pending, run, text, presetName: displayName } = useLightingOperation();
+  const { pending, run, text, presetName: displayName, isActive } = useLightingCatalogOperation();
   const { presetClassifications, presetDescription } = useLightingText();
   async function load() {
-    presets.value = await listLightingPresets("favorite_first");
+    const listed = await listLightingPresets("favorite_first");
+    if (!isActive()) return;
+    presets.value = listed;
     emit("loaded", JSON.parse(JSON.stringify(presets.value)));
+  }
+  async function favorite(preset: LightingPreset) {
+    const id = preset.id;
+    const target = !preset.favorite;
+    await run(
+      async () => {
+        const saved = await setLightingPresetFavorite(id, target);
+        if (!isActive()) return;
+        presets.value = presets.value.map((item) => (item.id === id ? saved : item));
+        emit("loaded", JSON.parse(JSON.stringify(presets.value)));
+        emit("favoriteChanged");
+      },
+      text("favoriteChanged", "收藏已更新")
+    );
   }
   async function apply(id: string) {
     if (props.draftOnly) {
@@ -115,46 +136,58 @@
         <option value="name">{{ text("name", "名称") }}</option>
       </select>
       <div role="listbox" class="max-h-72 overflow-y-auto">
-        <button
-          v-for="preset in visible"
-          :key="preset.id"
-          :data-preset="preset.id"
-          @click="apply(preset.id)"
-          :disabled="pending"
-          role="option"
-          :aria-selected="activePresetId === preset.id"
-          class="flex w-full flex-wrap items-center gap-2 rounded-lg p-2 text-left
-            hover:bg-white/10"
-        >
-          <span
-            data-color
-            class="h-3 w-3 rounded-full"
-            :style="{ backgroundColor: preset.lighting.main_light.color_start }"
-          ></span>
-          <span data-preset-name>
-            <template v-for="(part, i) in parts(displayName(preset))" :key="i">
-              <mark v-if="part.match">{{ part.text }}</mark
-              ><span v-else>{{ part.text }}</span>
-            </template>
-          </span>
-          <span data-preset-description class="w-full text-sm text-white/70">
-            <template v-for="(part, i) in parts(presetDescription(preset))" :key="i">
-              <mark v-if="part.match">{{ part.text }}</mark
-              ><span v-else>{{ part.text }}</span>
-            </template>
-          </span>
-          <small
-            v-for="classification in presetClassifications(preset)"
-            :key="classification"
-            data-preset-classification
-            class="rounded bg-white/10 px-2 py-0.5"
+        <div v-for="preset in visible" :key="preset.id" class="flex items-center gap-1">
+          <button
+            type="button"
+            :data-preset="preset.id"
+            @click="apply(preset.id)"
+            :disabled="pending"
+            role="option"
+            :aria-selected="activePresetId === preset.id"
+            class="flex min-w-0 flex-1 flex-wrap items-center gap-2 rounded-lg p-2 text-left
+              hover:bg-white/10"
           >
-            <template v-for="(part, i) in parts(classification)" :key="i">
-              <mark v-if="part.match">{{ part.text }}</mark
-              ><span v-else>{{ part.text }}</span>
-            </template>
-          </small>
-        </button>
+            <span
+              data-color
+              class="h-3 w-3 rounded-full"
+              :style="{ backgroundColor: preset.lighting.main_light.color_start }"
+            ></span>
+            <span data-preset-name>
+              <template v-for="(part, i) in parts(displayName(preset))" :key="i">
+                <mark v-if="part.match">{{ part.text }}</mark
+                ><span v-else>{{ part.text }}</span>
+              </template>
+            </span>
+            <span data-preset-description class="w-full text-sm text-white/70">
+              <template v-for="(part, i) in parts(presetDescription(preset))" :key="i">
+                <mark v-if="part.match">{{ part.text }}</mark
+                ><span v-else>{{ part.text }}</span>
+              </template>
+            </span>
+            <small
+              v-for="classification in presetClassifications(preset)"
+              :key="classification"
+              data-preset-classification
+              class="rounded bg-white/10 px-2 py-0.5"
+            >
+              <template v-for="(part, i) in parts(classification)" :key="i">
+                <mark v-if="part.match">{{ part.text }}</mark
+                ><span v-else>{{ part.text }}</span>
+              </template>
+            </small>
+          </button>
+          <button
+            type="button"
+            :data-favorite="preset.id"
+            :disabled="pending"
+            :aria-pressed="preset.favorite"
+            :aria-label="`${preset.favorite ? text('unfavorite', '取消收藏') : text('favorite', '收藏')} ${displayName(preset)}`"
+            class="favorite-button shrink-0 rounded-lg hover:bg-white/10"
+            @click="favorite(preset)"
+          >
+            <span aria-hidden="true">{{ preset.favorite ? "★" : "☆" }}</span>
+          </button>
+        </div>
       </div>
     </details>
   </section>
@@ -170,6 +203,19 @@
   }
   [role="option"]:disabled {
     opacity: 0.5;
+  }
+  .favorite-button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    font-size: 1.25rem;
+  }
+  button:focus-visible {
+    outline: 2px solid #7dd3fc;
+    outline-offset: 2px;
+  }
+  [data-preset-name],
+  [data-preset-description] {
+    overflow-wrap: anywhere;
   }
   mark {
     border-radius: 0.2rem;

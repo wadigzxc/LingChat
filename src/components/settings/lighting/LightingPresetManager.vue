@@ -1,16 +1,17 @@
 <script setup lang="ts">
-  import { ref, onMounted, watch } from "vue";
+  import { ref, onMounted, watch, computed } from "vue";
   import {
     listLightingPresets,
     createLightingPreset,
     updateLightingPreset,
+    setLightingPresetFavorite,
     deleteLightingPreset,
     exportLightingPreset,
     exportLightingPresets,
   } from "@/api/services/scene-lighting";
   import type { LightingParams, LightingPreset, LightingPresetDraft } from "@/types/scene-lighting";
   import { createNeutralLighting } from "@/utils/scene-lighting/defaults";
-  import { useLightingOperation } from "./useLightingOperation";
+  import { useLightingCatalogOperation } from "./useLightingCatalogOperation";
   import { useUIStore } from "@/stores/modules/ui/ui";
   import { isMobile } from "@/utils/platform";
   const desktop = !isMobile();
@@ -21,10 +22,16 @@
     await run(load);
     emit("changed");
   }
-  const props = defineProps<{ activeLighting?: LightingParams | null }>();
+  const props = defineProps<{ activeLighting?: LightingParams | null; refreshKey?: number }>();
   const ui = useUIStore();
-  const { pending, run, text, presetName } = useLightingOperation();
+  const { pending, run, text, presetName, isActive } = useLightingCatalogOperation();
   const presets = ref<LightingPreset[]>([]);
+  const visible = computed(() =>
+    [...presets.value].sort(
+      (a, b) =>
+        Number(b.favorite) - Number(a.favorite) || presetName(a).localeCompare(presetName(b))
+    )
+  );
   const draft = ref<LightingPresetDraft | null>(null);
   import { normalizeLighting } from "@/utils/scene-lighting/normalize";
   const lightingJson = ref("");
@@ -51,8 +58,10 @@
     });
   }
   const editingId = ref<string | null>(null);
+  const draftSourceId = ref<string | null>(null);
   function editPreset(preset: LightingPreset) {
     if (pending.value) return;
+    draftSourceId.value = preset.id;
     editingId.value = preset.kind === "user" ? preset.id : null;
     draft.value = JSON.parse(
       JSON.stringify({
@@ -74,10 +83,12 @@
       .filter(Boolean);
   }
   async function load() {
-    presets.value = await listLightingPresets("name");
+    const listed = await listLightingPresets("name");
+    if (isActive()) presets.value = listed;
   }
   function create() {
     if (pending.value) return;
+    draftSourceId.value = null;
     editingId.value = null;
     draft.value = {
       name: "",
@@ -94,9 +105,22 @@
     await run(async () => {
       if (!draft.value) return;
       if (!draft.value.name.trim()) throw new Error(text("nameRequired", "预设名称不能为空"));
-      const payload = JSON.parse(JSON.stringify(draft.value));
-      if (editingId.value && !asNew) await updateLightingPreset(editingId.value, payload);
-      else await createLightingPreset(payload);
+      const payload: LightingPresetDraft = JSON.parse(JSON.stringify(draft.value));
+      if (editingId.value && !asNew) {
+        const { name, description, aliases, tags, category, lighting } = payload;
+        await updateLightingPreset(editingId.value, {
+          name,
+          description,
+          aliases,
+          tags,
+          category,
+          lighting,
+        });
+      } else {
+        payload.favorite =
+          presets.value.find((p) => p.id === draftSourceId.value)?.favorite ?? payload.favorite;
+        await createLightingPreset(payload);
+      }
       emit("changed");
       draft.value = null;
       await load();
@@ -104,13 +128,17 @@
     });
   }
   async function favorite(preset: LightingPreset) {
-    await run(async () => {
-      if (preset.kind !== "user") return;
-      await updateLightingPreset(preset.id, { favorite: !preset.favorite });
-      emit("changed");
-      await load();
-      ui.showSuccess({ title: text("favoriteChanged", "收藏已更新"), duration: 2000 });
-    });
+    const id = preset.id;
+    const target = !preset.favorite;
+    await run(
+      async () => {
+        const saved = await setLightingPresetFavorite(id, target);
+        if (!isActive()) return;
+        presets.value = presets.value.map((item) => (item.id === id ? saved : item));
+        emit("changed");
+      },
+      text("favoriteChanged", "收藏已更新")
+    );
   }
   import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   async function exportOne(preset: LightingPreset) {
@@ -158,6 +186,20 @@
     });
   }
   onMounted(() => run(load));
+  let refreshQueued = false;
+  watch(
+    () => props.refreshKey,
+    () => {
+      if (pending.value) refreshQueued = true;
+      else void run(load);
+    }
+  );
+  watch(pending, (value) => {
+    if (!value && refreshQueued) {
+      refreshQueued = false;
+      void run(load);
+    }
+  });
 </script>
 <template>
   <section
@@ -184,7 +226,7 @@
     </button>
     <LightingImportDialog v-if="showImport && desktop" @imported="imported" />
     <ul>
-      <li v-for="preset in presets" :key="preset.id" :data-row="preset.id">
+      <li v-for="preset in visible" :key="preset.id" :data-row="preset.id">
         <input
           v-if="desktop && preset.kind === 'user'"
           type="checkbox"
@@ -203,11 +245,12 @@
         >
           {{ text("delete", "删除") }}</button
         ><button
-          v-if="preset.kind === 'user'"
+          type="button"
           :data-favorite="preset.id"
           :disabled="pending"
           @click="favorite(preset)"
           :aria-pressed="preset.favorite"
+          :aria-label="`${preset.favorite ? text('unfavorite', '取消收藏') : text('favorite', '收藏')} ${presetName(preset)}`"
         >
           {{ preset.favorite ? text("unfavorite", "取消收藏") : text("favorite", "收藏") }}</button
         ><button
@@ -311,6 +354,14 @@
     padding: 0.35rem 0.65rem;
     margin: 0.2rem;
     background: rgb(255 255 255 / 8%);
+  }
+  button:focus-visible {
+    outline: 2px solid #7dd3fc;
+    outline-offset: 2px;
+  }
+  [data-favorite] {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
   }
   button:hover:not(:disabled) {
     background: rgb(255 255 255 / 18%);

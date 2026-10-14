@@ -131,7 +131,10 @@ async fn relighting_real_export_inspect_commit_preserves_snapshot_and_old_parame
         &std::fs::read(destination.path().join("game_data/lighting_presets.json")).unwrap(),
     )
     .unwrap();
-    let saved_presets = saved.as_array().expect("persisted preset catalog");
+    assert_eq!(saved["version"], 1);
+    let saved_presets = saved["users"]
+        .as_array()
+        .expect("persisted preset catalog users");
     let stored = saved_presets
         .iter()
         .find(|entry| entry["id"] == imported.id)

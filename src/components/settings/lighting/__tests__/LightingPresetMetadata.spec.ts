@@ -9,6 +9,7 @@ import en from "@/locales/en/settings";
 import ja from "@/locales/ja/settings";
 import { invokeMock, preset, ui } from "./fixtures";
 import Select from "../LightingPresetSelect.vue";
+import Manager from "../LightingPresetManager.vue";
 vi.mock("@/stores/modules/ui/ui", () => ({ useUIStore: () => ui }));
 
 const dictionaries = { "zh-CN": cn, "zh-HK": hk, en, ja };
@@ -75,6 +76,59 @@ const descriptions = {
     "暖色の柔らかな光と控えめなブルーム。",
   ],
 };
+it.each(locales)(
+  "%s localizes favorite operations and literal names on selector and manager native buttons",
+  async (locale) => {
+    const operations = {
+      "zh-CN": ["收藏", "取消收藏"],
+      "zh-HK": ["收藏", "取消收藏"],
+      en: ["Favorite", "Unfavorite"],
+      ja: ["お気に入り", "お気に入りを解除"],
+    };
+    for (const Component of [Select, Manager]) {
+      let items = [builtins[0]!, preset({ name: "<b>Literal 原名</b>" })];
+      const originalItems = items;
+      const before = JSON.stringify(items);
+      invokeMock.mockImplementation(async (command, args) => {
+        if (command === "list_lighting_presets") return items;
+        if (command !== "set_lighting_preset_favorite")
+          throw new Error(`Unexpected command: ${command}`);
+        items = items.map((item) =>
+          item.id === args?.id ? { ...item, favorite: args.favorite as boolean } : item
+        );
+        return items.find((item) => item.id === args?.id);
+      });
+      const { i18n, global } = options();
+      const w = mount(Component, { global, attachTo: document.body });
+      await flushPromises();
+      const element = w.element;
+      i18n.global.locale.value = locale;
+      await nextTick();
+      for (const item of items) {
+        const name =
+          item.kind === "built_in" ? dictionaries[locale].lighting.presets.neutral : item.name;
+        const star = w.get(`[data-favorite="${item.id}"]`);
+        expect(star.element.tagName).toBe("BUTTON");
+        expect(star.attributes("type")).toBe("button");
+        expect(star.attributes("aria-label")).toBe(`${operations[locale][0]} ${name}`);
+        (star.element as HTMLButtonElement).focus();
+        expect(document.activeElement).toBe(star.element);
+        await star.trigger("click");
+        await flushPromises();
+        expect(star.attributes("aria-label")).toBe(`${operations[locale][1]} ${name}`);
+        expect(star.attributes("aria-pressed")).toBe("true");
+        expect(ui.showSuccess).toHaveBeenLastCalledWith({
+          title: dictionaries[locale].lighting.favoriteChanged,
+          duration: 2000,
+        });
+      }
+      expect(w.find("b").exists()).toBe(false);
+      expect(w.element).toBe(element);
+      expect(JSON.stringify(originalItems)).toBe(before);
+      w.unmount();
+    }
+  }
+);
 it("localizes builtin classifications and deduplicates raw and localized tags in stable order", async () => {
   const classes = {
     "zh-CN": ["基础", "电影感", "自然", "夜景", "室内"],

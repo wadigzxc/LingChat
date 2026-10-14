@@ -65,6 +65,7 @@
         :refresh-key="lightingPresetVersion"
         :active-preset-id="gameStore.activeLightingPresetId"
         @loaded="handlePresetsLoaded"
+        @favorite-changed="lightingPresetVersion++"
       />
       <button
         data-save-scene-default
@@ -88,6 +89,7 @@
       <LightingPresetManager
         v-if="showLightingManager"
         :active-lighting="gameStore.activeLighting"
+        :refresh-key="lightingPresetVersion"
         @changed="lightingPresetVersion++"
       />
 
@@ -515,6 +517,8 @@
       :mode="editMode"
       :backgrounds="backgroundList"
       :initial-data="editInitialData"
+      :lighting-preset-refresh-key="lightingPresetVersion"
+      @favorite-changed="lightingPresetVersion++"
       @close="showSceneEdit = false"
       :scene-key="editingSceneId"
       :save-scene="handleSceneSubmit"

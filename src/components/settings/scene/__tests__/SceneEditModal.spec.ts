@@ -1,4 +1,4 @@
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, DOMWrapper } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { createI18n } from "vue-i18n";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -37,7 +37,11 @@ const initial = (
   lighting_preset_revision: null,
   lighting_customized: false,
 });
-async function open(data = initial(), extra = {}) {
+async function open(
+  data = initial(),
+  extra = {},
+  stubs: Record<string, any> = { teleport: true, transition: false }
+) {
   const wrapper = mount(SceneEditModal, {
     props: { show: false, mode: "update", backgrounds: [], initialData: data, ...extra },
     global: {
@@ -51,7 +55,7 @@ async function open(data = initial(), extra = {}) {
           messages: { zh: {} },
         }),
       ],
-      stubs: { teleport: true, transition: false },
+      stubs,
     },
   });
   await wrapper.setProps({ show: true });
@@ -65,6 +69,84 @@ beforeEach(() => {
   roleFixture.gameRoles = {};
 });
 describe("scene editor draft", () => {
+  it("refreshes favorite metadata without remounting the editor or altering its dirty scene draft", async () => {
+    let item = preset();
+    api.list.mockImplementation(async () => [item]);
+    invokeMock.mockImplementation(async (cmd, args) => {
+      if (cmd !== "set_lighting_preset_favorite") throw new Error(`Unexpected command: ${cmd}`);
+      item = { ...item, favorite: args?.favorite as boolean };
+      return item;
+    });
+    // Use the real Teleport: VTU's generated teleport stub is replaced on parent prop updates.
+    const w = await open(
+      initial(createNeutralLighting()),
+      { lightingPresetRefreshKey: 0 },
+      { teleport: false, transition: false }
+    );
+    const dialog = new DOMWrapper(document.body.querySelector("[data-editor-dialog]")!);
+    await dialog.get('[aria-label="场景名称"]').setValue("Unsaved scene");
+    await dialog.get('[aria-label="总强度"]').setValue(0.7);
+    const input = dialog.get('[aria-label="场景名称"]').element;
+    const star = dialog.get('[data-favorite="user:one"]').element;
+    item = { ...item, favorite: true };
+    await w.setProps({ lightingPresetRefreshKey: 1 });
+    await flushPromises();
+    expect(dialog.get('[data-favorite="user:one"]').attributes("aria-pressed")).toBe("true");
+    expect(dialog.get('[data-favorite="user:one"]').element).toBe(star);
+    expect(dialog.get('[aria-label="场景名称"]').element).toBe(input);
+    expect(input).toHaveProperty("value", "Unsaved scene");
+    expect(dialog.get('[aria-label="总强度"]').element).toHaveProperty("value", "0.7");
+    await dialog.get('[data-favorite="user:one"]').trigger("click");
+    await flushPromises();
+    expect(w.emitted("favoriteChanged")).toHaveLength(1);
+    expect(dialog.find("[data-draft-discard]").exists()).toBe(false);
+    expect(api.apply).not.toHaveBeenCalled();
+    expect(w.emitted("submit")).toBeUndefined();
+    w.unmount();
+  });
+  it("settles a captured favorite after an accepted scene switch without applying it or dirtying the new scene", async () => {
+    let item = preset({ id: "builtin:moon", kind: "built_in" });
+    api.list.mockImplementation(async () => [item]);
+    let finish!: (value: unknown) => void;
+    invokeMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const w = await open(
+      initial(createNeutralLighting()),
+      { sceneKey: "old", lightingPresetRefreshKey: 0 },
+      { teleport: false, transition: false }
+    );
+    const dialog = new DOMWrapper(document.body.querySelector("[data-editor-dialog]")!);
+    const input = dialog.get('[aria-label="场景名称"]').element;
+    await dialog.get('[data-favorite="builtin:moon"]').trigger("click");
+    expect(dialog.get('[data-favorite="builtin:moon"]').attributes("aria-pressed")).toBe("false");
+    const nextLighting = createNeutralLighting();
+    nextLighting.master_intensity = 1.5;
+    await w.setProps({
+      initialData: { ...initial(nextLighting), sceneName: "Next scene" },
+      sceneKey: "next",
+      lightingPresetRefreshKey: 1,
+    });
+    item = { ...item, favorite: true };
+    finish(item);
+    await flushPromises();
+    expect(invokeMock.mock.calls).toEqual([
+      ["set_lighting_preset_favorite", { id: "builtin:moon", favorite: true }],
+    ]);
+    expect(dialog.get('[aria-label="场景名称"]').element).toBe(input);
+    expect(input).toHaveProperty("value", "Next scene");
+    expect(dialog.get('[aria-label="总强度"]').element).toHaveProperty("value", "1.5");
+    expect(dialog.get('[data-favorite="builtin:moon"]').attributes("aria-pressed")).toBe("true");
+    expect(w.emitted("submit")).toBeUndefined();
+    expect(api.apply).not.toHaveBeenCalled();
+    await dialog.get('button[aria-label="关闭"]').trigger("click");
+    expect(dialog.find("[data-draft-discard]").exists()).toBe(false);
+    expect(w.emitted("close")).toHaveLength(1);
+    w.unmount();
+  });
   it("names lighting presets and explicitly includes Live2D support without exclusivity", async () => {
     const w = await open();
     expect(w.get("[data-legacy-lighting] summary").text()).toBe("光影与预设");

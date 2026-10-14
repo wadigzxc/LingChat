@@ -4,7 +4,9 @@
 
 **Blocked by:** Task 1
 
-**Status:** pending
+**Status:** in-progress
+
+**Frozen baseline:** `55836d5954018f00784dafc286a1356928ff7e07`。本轮仅 Task 2；API、旧格式兼容与单原子文件持久化契约见仓库外 `presets-ux-followup/task2/TASK2-CONTRACT.md`。
 
 - [ ] 用户可见行为符合上述交付契约
 - [ ] 真实针对性测试与所需类型/构建检查通过

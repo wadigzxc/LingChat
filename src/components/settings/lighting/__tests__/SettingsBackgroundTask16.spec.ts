@@ -1,4 +1,4 @@
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, DOMWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { createApp } from "vue";
@@ -10,6 +10,9 @@ function freshPinia() {
 }
 import { createI18n } from "vue-i18n";
 import SettingsBackground from "../../pages/SettingsBackground.vue";
+import LightingPresetSelect from "../LightingPresetSelect.vue";
+import LightingPresetManager from "../LightingPresetManager.vue";
+import SceneEditModal from "../../scene/SceneEditModal.vue";
 import { useGameStore } from "@/stores/modules/game";
 import { useSettingsStore } from "@/stores/modules/settings";
 import { useUIStore } from "@/stores/modules/ui/ui";
@@ -113,6 +116,83 @@ beforeEach(() => {
   );
 });
 describe("Task16 background settings DOM", () => {
+  it("refreshes favorites between selectors and manager without remounting or replacing unsaved drafts", async () => {
+    presets = [preset(), preset({ id: "builtin:z", kind: "built_in", name: "Zulu" })];
+    invokeMock.mockImplementation(async (cmd, args) => {
+      if (cmd === "list_scenes") return items;
+      if (cmd === "list_lighting_presets") return presets;
+      if (cmd === "set_lighting_preset_favorite") {
+        presets = presets.map((p) =>
+          p.id === args?.id ? { ...p, favorite: args.favorite as boolean } : p
+        );
+        return presets.find((p) => p.id === args?.id);
+      }
+      return {};
+    });
+    const global = options();
+    global.stubs.SceneEditModal = false as any;
+    const w = mount(SettingsBackground, {
+      global: { ...global, stubs: { ...global.stubs, teleport: false, transition: false } },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const selector = w.getComponent(LightingPresetSelect);
+    const selectorElement = selector.element;
+    await selector.get("[data-search]").setValue("Night");
+    await selector.get("[data-sort]").setValue("name");
+    await w.get("[data-manage-lighting]").trigger("click");
+    await flushPromises();
+    const manager = w.getComponent(LightingPresetManager);
+    await manager.get('[data-edit="user:one"]').trigger("click");
+    await manager.get("[data-name]").setValue("Unsaved preset");
+    const managerElement = manager.element;
+    await w.get('[data-scene-card="scene-1"] button').trigger("click");
+    await flushPromises();
+    const editor = w.getComponent(SceneEditModal);
+    const editorDom = new DOMWrapper(document.body.querySelector("[data-editor-dialog]")!);
+    await editorDom.get('[aria-label="场景名称"]').setValue("Unsaved scene");
+    await editorDom.get('[aria-label="总强度"]').setValue(0.7);
+    const editorInput = editorDom.get('[aria-label="场景名称"]').element;
+    const editorSelector = editor.getComponent(LightingPresetSelect);
+    const gameBefore = JSON.stringify(game.$state);
+    const scenesBefore = JSON.stringify(items);
+    const statusBefore = w.get("[data-active-lighting-status]").text();
+    invokeMock.mockClear();
+    await selector.get('[data-favorite="builtin:z"]').trigger("click");
+    await flushPromises();
+    expect(manager.get('[data-favorite="builtin:z"]').attributes("aria-pressed")).toBe("true");
+    expect(editorSelector.get('[data-favorite="builtin:z"]').attributes("aria-pressed")).toBe(
+      "true"
+    );
+    await manager.get('[data-favorite="builtin:z"]').trigger("click");
+    await flushPromises();
+    expect(selector.get('[data-favorite="builtin:z"]').attributes("aria-pressed")).toBe("false");
+    expect(editorSelector.get('[data-favorite="builtin:z"]').attributes("aria-pressed")).toBe(
+      "false"
+    );
+    await editorSelector.get('[data-favorite="user:one"]').trigger("click");
+    await flushPromises();
+    expect(selector.get('[data-favorite="user:one"]').attributes("aria-pressed")).toBe("true");
+    expect(manager.get('[data-favorite="user:one"]').attributes("aria-pressed")).toBe("true");
+    expect(selector.element).toBe(selectorElement);
+    expect(manager.element).toBe(managerElement);
+    expect(editorDom.get('[aria-label="场景名称"]').element).toBe(editorInput);
+    expect(selector.get("[data-search]").element).toHaveProperty("value", "Night");
+    expect(selector.get("[data-sort]").element).toHaveProperty("value", "name");
+    expect(manager.get("[data-name]").element).toHaveProperty("value", "Unsaved preset");
+    expect(editorInput).toHaveProperty("value", "Unsaved scene");
+    expect(editorDom.get('[aria-label="总强度"]').element).toHaveProperty("value", "0.7");
+    expect(editorDom.find("[data-draft-discard]").exists()).toBe(false);
+    expect(JSON.stringify(game.$state)).toBe(gameBefore);
+    expect(JSON.stringify(items)).toBe(scenesBefore);
+    expect(w.get("[data-active-lighting-status]").text()).toBe(statusBefore);
+    expect(
+      invokeMock.mock.calls.every(([cmd]) =>
+        ["set_lighting_preset_favorite", "list_lighting_presets"].includes(cmd)
+      )
+    ).toBe(true);
+    w.unmount();
+  });
   it("keeps card artwork isolated and exposes the edit control on keyboard focus", async () => {
     const w = await openPage();
     const card = w.get('[data-scene-card="scene-1"]');

@@ -749,6 +749,7 @@ pub fn run() {
             api::scene_lighting::list_lighting_presets,
             api::scene_lighting::create_lighting_preset,
             api::scene_lighting::update_lighting_preset,
+            api::scene_lighting::set_lighting_preset_favorite,
             api::scene_lighting::delete_lighting_preset,
             api::scene_lighting::apply_lighting_preset,
             api::scene_lighting::apply_lighting_params,

@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::builtins::builtin_presets;
+use super::catalog::Catalog;
 use super::model::{
     LightingPreset, LightingPresetDraft, LightingPresetUpdate, PresetKind, PresetSort,
 };
@@ -37,10 +38,16 @@ impl LightingPresetStore {
         F: FnOnce(&mut Vec<LightingPreset>, &[LightingPreset]) -> Result<LightingPreset>,
     {
         let _guard = self.mutation_lock.lock().await;
-        let mut users = self.load_users()?;
-        let builtins = builtin_presets();
-        let imported = operation(&mut users, &builtins)?;
-        self.save_users(&users)?;
+        let mut catalog = self.load_catalog()?;
+        let builtins: Vec<_> = builtin_presets()
+            .into_iter()
+            .map(|p| catalog.project(p))
+            .collect();
+        let imported = operation(&mut catalog.users, &builtins)?;
+        catalog
+            .favorites
+            .insert(imported.id.clone(), imported.favorite);
+        self.save_catalog(&catalog)?;
         Ok(imported)
     }
 
@@ -50,9 +57,28 @@ impl LightingPresetStore {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Changes only favorite metadata, never effect identity or recent use.
+    pub async fn set_favorite(&self, id: &str, favorite: bool) -> Result<LightingPreset> {
+        let _guard = self.mutation_lock.lock().await;
+        let mut catalog = self.load_catalog()?;
+        let preset = builtin_presets()
+            .into_iter()
+            .chain(catalog.users.iter().cloned())
+            .find(|preset| !id.is_empty() && preset.id == id)
+            .with_context(|| format!("光影预设不存在: {id}"))?;
+        let mut preset = catalog.project(preset);
+        let changed = preset.favorite != favorite;
+        preset.favorite = favorite;
+        if changed {
+            catalog.favorites.insert(id.to_string(), favorite);
+            self.save_catalog(&catalog)?;
+        }
+        Ok(preset)
+    }
+
     pub async fn create(&self, draft: LightingPresetDraft) -> Result<LightingPreset> {
         let _guard = self.mutation_lock.lock().await;
-        let mut users = self.load_users()?;
+        let mut catalog = self.load_catalog()?;
         let id = format!("user:{}", Uuid::new_v4());
         let now = now();
         let mut lighting = draft.lighting;
@@ -74,20 +100,19 @@ impl LightingPresetStore {
             created_at: now.clone(),
             updated_at: now,
         };
-        users.push(preset.clone());
-        self.save_users(&users)?;
+        catalog.favorites.insert(preset.id.clone(), preset.favorite);
+        catalog.users.push(preset.clone());
+        self.save_catalog(&catalog)?;
         Ok(preset)
     }
 
     pub async fn get(&self, id: &str) -> Result<Option<LightingPreset>> {
         let _guard = self.mutation_lock.lock().await;
+        let catalog = self.load_catalog()?;
         if let Some(preset) = builtin_presets().into_iter().find(|preset| preset.id == id) {
-            return Ok(Some(preset));
+            return Ok(Some(catalog.project(preset)));
         }
-        Ok(self
-            .load_users()?
-            .into_iter()
-            .find(|preset| preset.id == id))
+        Ok(catalog.users.into_iter().find(|preset| preset.id == id))
     }
 
     pub async fn lighting_for_application(&self, id: &str) -> Result<Option<LightingParams>> {
@@ -102,24 +127,28 @@ impl LightingPresetStore {
     /// Generated built-ins remain immutable.
     pub async fn take_for_application(&self, id: &str) -> Result<Option<LightingPreset>> {
         let _guard = self.mutation_lock.lock().await;
+        let mut catalog = self.load_catalog()?;
         if let Some(preset) = builtin_presets().into_iter().find(|preset| preset.id == id) {
-            return Ok(Some(preset));
+            return Ok(Some(catalog.project(preset)));
         }
 
-        let mut users = self.load_users()?;
-        let Some(preset) = users.iter_mut().find(|preset| preset.id == id) else {
+        let Some(preset) = catalog.users.iter_mut().find(|preset| preset.id == id) else {
             return Ok(None);
         };
         preset.last_used_at = Some(now());
         let result = preset.clone();
-        self.save_users(&users)?;
+        self.save_catalog(&catalog)?;
         Ok(Some(result))
     }
 
     pub async fn list(&self, sort: PresetSort) -> Result<Vec<LightingPreset>> {
         let _guard = self.mutation_lock.lock().await;
-        let mut presets = builtin_presets();
-        presets.extend(self.load_users()?);
+        let catalog = self.load_catalog()?;
+        let mut presets: Vec<_> = builtin_presets()
+            .into_iter()
+            .map(|p| catalog.project(p))
+            .collect();
+        presets.extend(catalog.users);
         match sort {
             PresetSort::Name => presets.sort_by(compare_name_then_id),
             PresetSort::FavoriteFirst => presets.sort_by(|left, right| {
@@ -143,8 +172,9 @@ impl LightingPresetStore {
         if id.starts_with("builtin:") {
             bail!("内置光影预设不可更新: {id}");
         }
-        let mut users = self.load_users()?;
-        let preset = users
+        let mut catalog = self.load_catalog()?;
+        let preset = catalog
+            .users
             .iter_mut()
             .find(|preset| preset.id == id)
             .with_context(|| format!("光影预设不存在: {id}"))?;
@@ -152,7 +182,8 @@ impl LightingPresetStore {
         preset.revision = preset.revision.saturating_add(1);
         preset.updated_at = now();
         let result = preset.clone();
-        self.save_users(&users)?;
+        catalog.favorites.insert(result.id.clone(), result.favorite);
+        self.save_catalog(&catalog)?;
         Ok(result)
     }
 
@@ -161,30 +192,26 @@ impl LightingPresetStore {
         if id.starts_with("builtin:") {
             bail!("内置光影预设不可删除: {id}");
         }
-        let mut users = self.load_users()?;
-        let Some(index) = users.iter().position(|preset| preset.id == id) else {
+        let mut catalog = self.load_catalog()?;
+        let Some(index) = catalog.users.iter().position(|preset| preset.id == id) else {
             return Ok(None);
         };
-        let removed = users.remove(index);
-        self.save_users(&users)?;
+        let removed = catalog.users.remove(index);
+        catalog.favorites.remove(id);
+        self.save_catalog(&catalog)?;
         Ok(Some(removed))
     }
 
-    fn load_users(&self) -> Result<Vec<LightingPreset>> {
+    fn load_catalog(&self) -> Result<Catalog> {
         if !self.path.exists() {
-            return Ok(Vec::new());
+            return Ok(Catalog::default());
         }
         let bytes = std::fs::read(&self.path)
             .with_context(|| format!("读取光影预设失败: {:?}", self.path))?;
-        let users: Vec<LightingPreset> = serde_json::from_slice(&bytes)
-            .with_context(|| format!("解析光影预设失败: {:?}", self.path))?;
-        Ok(users
-            .into_iter()
-            .filter(|preset| preset.kind == PresetKind::User)
-            .collect())
+        Catalog::from_bytes(&bytes).with_context(|| format!("解析光影预设失败: {:?}", self.path))
     }
 
-    fn save_users(&self, users: &[LightingPreset]) -> Result<()> {
+    fn save_catalog(&self, catalog: &Catalog) -> Result<()> {
         #[cfg(test)]
         if self
             .fail_next_save
@@ -194,7 +221,7 @@ impl LightingPresetStore {
         }
         let parent = self.path.parent().context("光影预设路径没有父目录")?;
         std::fs::create_dir_all(parent)?;
-        atomic_replace_file(&self.path, &serde_json::to_vec_pretty(users)?)
+        atomic_replace_file(&self.path, &catalog.to_bytes()?)
             .with_context(|| format!("写入光影预设失败: {:?}", self.path))
     }
 }

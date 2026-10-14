@@ -134,6 +134,8 @@
                   <LightingPresetSelect
                     draft-only
                     :active-preset-id="draft.lighting_preset_id"
+                    :refresh-key="lightingPresetRefreshKey"
+                    @favorite-changed="emit('favoriteChanged')"
                     @select="choosePreset"
                     @loaded="presets = $event"
                   />
@@ -299,8 +301,13 @@
   import { createRelightingParams } from "@/utils/scene-lighting/relighting-params";
   import RelightingPanel from "./lighting/RelightingPanel.vue";
   import OverallPanel from "./lighting/OverallPanel.vue";
-  const props = defineProps<SceneEditorProps>();
-  const emit = defineEmits<{ close: []; submit: [data: SceneEditorData]; upload: [] }>();
+  const props = defineProps<SceneEditorProps & { lightingPresetRefreshKey?: number }>();
+  const emit = defineEmits<{
+    close: [];
+    submit: [data: SceneEditorData];
+    upload: [];
+    favoriteChanged: [];
+  }>();
   const { text, presetName } = useSceneEditorText();
   const ui = useUIStore();
   const gameStore = useGameStore();

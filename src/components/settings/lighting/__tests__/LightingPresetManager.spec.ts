@@ -100,18 +100,197 @@ describe("LightingPresetManager DOM", () => {
     expect(invokeMock).toHaveBeenCalledWith("delete_lighting_preset", { id: "user:one" });
     expect(ui.showSuccess).toHaveBeenCalledWith(expect.objectContaining({ duration: 2000 }));
   });
-  it("toggles user favorite using only the preset update API", async () => {
-    const item = preset();
+  it.each(["user", "built_in"] as const)(
+    "toggles %s favorite through the metadata-only command",
+    async (kind) => {
+      let item = preset({ kind, id: kind === "user" ? "user:one" : "builtin:moon" });
+      const originalItem = item;
+      const original = JSON.stringify(item);
+      invokeMock.mockImplementation(async (cmd, args) => {
+        if (cmd === "list_lighting_presets") return [item];
+        if (cmd === "set_lighting_preset_favorite") {
+          item = { ...item, favorite: args?.favorite as boolean };
+          return item;
+        }
+        throw new Error(`Unexpected command: ${cmd}`);
+      });
+      const w = mount(LightingPresetManager, { global: globalOptions() });
+      await flushPromises();
+      invokeMock.mockClear();
+      const star = w.get(`[data-favorite="${item.id}"]`);
+      await star.trigger("click");
+      await flushPromises();
+      expect(invokeMock.mock.calls.filter(([cmd]) => cmd !== "list_lighting_presets")).toEqual([
+        ["set_lighting_preset_favorite", { id: item.id, favorite: true }],
+      ]);
+      expect(star.attributes("type")).toBe("button");
+      expect(star.attributes("aria-pressed")).toBe("true");
+      expect(star.attributes("aria-label")).toBe("取消收藏 Moon");
+      expect(w.emitted("changed")).toHaveLength(1);
+      expect(JSON.stringify(originalItem)).toBe(original);
+      if (kind === "built_in") {
+        expect(w.find(`[data-delete="${item.id}"]`).exists()).toBe(false);
+        expect(w.find(`[data-export="${item.id}"]`).exists()).toBe(false);
+      }
+      w.unmount();
+    }
+  );
+  it("orders favorites first immediately after a successful write without losing other presets", async () => {
+    let items = [
+      preset({ id: "user:a", name: "Alpha" }),
+      preset({ id: "builtin:z", kind: "built_in", name: "Zulu" }),
+    ];
+    invokeMock.mockImplementation(async (cmd, args) => {
+      if (cmd === "list_lighting_presets") return items;
+      items = items.map((item) =>
+        item.id === args?.id ? { ...item, favorite: args.favorite as boolean } : item
+      );
+      return items.find((item) => item.id === args?.id);
+    });
     const w = mount(LightingPresetManager, { global: globalOptions() });
     await flushPromises();
-    await w.get('[data-favorite="user:one"]').trigger("click");
+    await w.get('[data-favorite="builtin:z"]').trigger("click");
     await flushPromises();
-    expect(invokeMock).toHaveBeenCalledWith("update_lighting_preset", {
-      id: "user:one",
-      update: { favorite: true },
-    });
-    expect(item.favorite).toBe(false);
+    expect(w.findAll("[data-row]").map((row) => row.attributes("data-row"))).toEqual([
+      "builtin:z",
+      "user:a",
+    ]);
+    await w.get('[data-favorite="builtin:z"]').trigger("click");
+    await flushPromises();
+    expect(w.findAll("[data-row]").map((row) => row.attributes("data-row"))).toEqual([
+      "user:a",
+      "builtin:z",
+    ]);
+    w.unmount();
   });
+  it.each([false, true])(
+    "guards duplicate favorite requests, retries failures, and suppresses late success after unmount (failure=%s)",
+    async (failure) => {
+      const item = preset({ kind: "built_in", id: "builtin:moon" });
+      let settle!: (value: unknown) => void;
+      let reject!: (reason: Error) => void;
+      invokeMock.mockImplementation((cmd) =>
+        cmd === "list_lighting_presets"
+          ? Promise.resolve([item])
+          : new Promise((resolve, fail) => {
+              settle = resolve;
+              reject = fail;
+            })
+      );
+      const changed = vi.fn();
+      const w = mount(LightingPresetManager, {
+        props: { onChanged: changed },
+        global: globalOptions(),
+      });
+      await flushPromises();
+      await w.get('[data-edit="builtin:moon"]').trigger("click");
+      await w.get("[data-name]").setValue("Untouched draft");
+      const star = w.get('[data-favorite="builtin:moon"]');
+      await star.trigger("click");
+      await star.trigger("click");
+      expect(
+        invokeMock.mock.calls.filter(([cmd]) => cmd === "set_lighting_preset_favorite")
+      ).toHaveLength(1);
+      expect(star.attributes("aria-pressed")).toBe("false");
+      expect(star.attributes("disabled")).toBeDefined();
+      expect(w.get("fieldset").attributes("disabled")).toBeDefined();
+      reject(new Error("favorite denied"));
+      await flushPromises();
+      expect(changed).not.toHaveBeenCalled();
+      expect(star.attributes("aria-pressed")).toBe("false");
+      expect(star.attributes("disabled")).toBeUndefined();
+      expect((w.get("[data-name]").element as HTMLInputElement).value).toBe("Untouched draft");
+      expect(ui.showError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "favorite denied" })
+      );
+      await star.trigger("click");
+      ui.showSuccess.mockClear();
+      ui.showError.mockClear();
+      w.unmount();
+      if (failure) reject(new Error("late rejection"));
+      else settle({ ...item, favorite: true });
+      await flushPromises();
+      expect(changed).not.toHaveBeenCalled();
+      expect(ui.showSuccess).not.toHaveBeenCalled();
+      expect(ui.showError).not.toHaveBeenCalled();
+      expect(item.favorite).toBe(false);
+    }
+  );
+  it("queues a metadata refresh during a captured favorite write without replacing the open preset draft", async () => {
+    let item = preset();
+    let finish!: (value: unknown) => void;
+    invokeMock.mockImplementation((cmd) =>
+      cmd === "list_lighting_presets"
+        ? Promise.resolve([item])
+        : new Promise((resolve) => {
+            finish = resolve;
+          })
+    );
+    const w = mount(LightingPresetManager, { props: { refreshKey: 0 }, global: globalOptions() });
+    await flushPromises();
+    await w.get('[data-edit="user:one"]').trigger("click");
+    await w.get("[data-name]").setValue("Unsaved preset");
+    await w.get('[data-favorite="user:one"]').trigger("click");
+    await w.setProps({ refreshKey: 1 });
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "list_lighting_presets")).toHaveLength(
+      1
+    );
+    item = preset({ name: "Fresh library", favorite: true });
+    finish(preset({ favorite: true }));
+    await flushPromises();
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "set_lighting_preset_favorite")).toEqual(
+      [["set_lighting_preset_favorite", { id: "user:one", favorite: true }]]
+    );
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "list_lighting_presets")).toHaveLength(
+      2
+    );
+    expect(w.get('[data-row="user:one"]').text()).toContain("Fresh library");
+    expect(w.get('[data-favorite="user:one"]').attributes("aria-pressed")).toBe("true");
+    expect(w.get("[data-name]").element).toHaveProperty("value", "Unsaved preset");
+    w.unmount();
+  });
+  it.each([
+    { kind: "user" as const, asNew: false },
+    { kind: "user" as const, asNew: true },
+    { kind: "built_in" as const, asNew: true },
+  ])(
+    "preserves current favorites when saving an older $kind draft (asNew=$asNew)",
+    async ({ kind, asNew }) => {
+      let item = preset({ kind, id: kind === "user" ? "user:one" : "builtin:moon" });
+      invokeMock.mockImplementation(async (cmd, args) => {
+        if (cmd === "list_lighting_presets") return [item];
+        if (cmd === "set_lighting_preset_favorite") {
+          item = { ...item, favorite: args?.favorite as boolean };
+          return item;
+        }
+        return item;
+      });
+      const w = mount(LightingPresetManager, { global: globalOptions() });
+      await flushPromises();
+      await w.get(`[data-edit="${item.id}"]`).trigger("click");
+      await w.get("[data-name]").setValue("Unsaved name");
+      await w.get("[data-intensity]").setValue("1.4");
+      await w.get(`[data-favorite="${item.id}"]`).trigger("click");
+      await flushPromises();
+      expect((w.get("[data-name]").element as HTMLInputElement).value).toBe("Unsaved name");
+      expect((w.get("[data-intensity]").element as HTMLInputElement).value).toBe("1.4");
+      if (asNew && kind === "user") await w.get("[data-save-as]").trigger("click");
+      else await w.get("form").trigger("submit");
+      await flushPromises();
+      const write = invokeMock.mock.calls.find(
+        ([cmd]) => cmd === (asNew ? "create_lighting_preset" : "update_lighting_preset")
+      );
+      expect(write).toBeDefined();
+      const payload = write![1]![asNew ? "draft" : "update"];
+      expect(payload).toMatchObject({ name: "Unsaved name", lighting: { master_intensity: 1.4 } });
+      if (asNew) expect(payload).toHaveProperty("favorite", true);
+      else {
+        expect(payload).not.toHaveProperty("favorite");
+        expect(payload).not.toHaveProperty("last_used_at");
+      }
+      w.unmount();
+    }
+  );
   it("blocks duplicate writes and keeps the draft editable after a failed save", async () => {
     const w = mount(LightingPresetManager, { attachTo: document.body, global: globalOptions() });
     await flushPromises();

@@ -282,11 +282,13 @@ async fn user_preset_crud_persists_changes() {
     assert_eq!(deleted.unwrap().id, created.id);
     assert!(store.get(&created.id).await.unwrap().is_none());
 
-    let persisted: Vec<LightingPreset> = serde_json::from_slice(
+    let persisted: serde_json::Value = serde_json::from_slice(
         &std::fs::read(temp.path().join("game_data/lighting_presets.json")).unwrap(),
     )
     .unwrap();
-    assert!(persisted.is_empty());
+    assert_eq!(persisted["version"], 1);
+    assert!(persisted["users"].as_array().unwrap().is_empty());
+    assert!(persisted["favorites"].as_object().unwrap().is_empty());
 }
 
 #[test]

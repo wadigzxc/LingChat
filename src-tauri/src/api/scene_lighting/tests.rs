@@ -12,6 +12,55 @@ use crate::ai_service::game_system::scene_transition::{SceneLightingSource, Scen
 use crate::api::game::should_restore_startup_scene;
 
 #[tokio::test]
+async fn favorite_command_is_registered_and_metadata_only_with_durable_errors() {
+    assert!(
+        include_str!("../../lib.rs").contains("api::scene_lighting::set_lighting_preset_favorite,"),
+        "favorite IPC must be registered"
+    );
+    let command = include_str!("commands.rs")
+        .split("pub async fn set_lighting_preset_favorite(")
+        .nth(1)
+        .unwrap()
+        .split("#[tauri::command]")
+        .next()
+        .unwrap();
+    assert!(command.contains("id: String"));
+    assert!(command.contains("favorite: bool"));
+    assert!(command.contains("Result<LightingPreset, String>"));
+    assert!(!command.contains("AppHandle"));
+    assert!(!command.contains("SceneStatePayload"));
+    assert!(!command.contains("emit_scene_state"));
+    let root = tempfile::tempdir().unwrap();
+    let store = LightingPresetStore::new(root.path());
+    let mut expected = store.get("builtin:neutral").await.unwrap().unwrap();
+    expected.favorite = true;
+    let result = super::commands::favorite_preset_in_store(&store, &expected.id, true)
+        .await
+        .unwrap();
+    assert_eq!(result, expected);
+    let file = root.path().join("game_data/lighting_presets.json");
+    let before = std::fs::read(&file).unwrap();
+    store.fail_next_save_for_test();
+    let error = super::commands::favorite_preset_in_store(&store, &expected.id, false)
+        .await
+        .unwrap_err();
+    assert!(error.contains("injected preset save failure"));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    assert_eq!(
+        LightingPresetStore::new(root.path())
+            .get(&expected.id)
+            .await
+            .unwrap(),
+        Some(expected)
+    );
+    let error = super::commands::favorite_preset_in_store(&store, "missing", true)
+        .await
+        .unwrap_err();
+    assert!(error.contains("光影预设不存在"));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[tokio::test]
 async fn preset_application_reads_and_marks_one_latest_snapshot_for_manual_and_ai() {
     use crate::ai_service::game_system::lighting_presets::LightingPresetUpdate;
     for source in [
