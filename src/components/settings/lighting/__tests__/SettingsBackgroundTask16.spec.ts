@@ -265,7 +265,9 @@ describe("Task16 background settings DOM", () => {
     const ok = vi.spyOn(useUIStore(), "showSuccess");
     const error = vi.spyOn(useUIStore(), "showError");
     invokeMock.mockImplementation((cmd) =>
-      cmd === "update_scene" ? wait.promise : Promise.resolve(items)
+      cmd === "update_scene"
+        ? wait.promise
+        : Promise.resolve(cmd === "list_scenes" ? items : presets)
     );
     await w.get("[data-save-scene-default]").trigger("click");
     await w.get("[data-save-scene-default]").trigger("click");
@@ -282,7 +284,9 @@ describe("Task16 background settings DOM", () => {
     const w = await openPage();
     const wait = deferred<unknown>();
     invokeMock.mockImplementation((cmd) =>
-      cmd === "update_scene" ? wait.promise : Promise.resolve(items)
+      cmd === "update_scene"
+        ? wait.promise
+        : Promise.resolve(cmd === "list_scenes" ? items : presets)
     );
     await w.get("[data-save-scene-default]").trigger("click");
     game.activeLighting.master_intensity = 0.4;

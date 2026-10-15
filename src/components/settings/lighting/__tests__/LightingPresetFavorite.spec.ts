@@ -1,4 +1,5 @@
 import { mount, flushPromises } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invokeMock, preset, globalOptions, ui } from "./fixtures";
 import LightingPresetSelect from "../LightingPresetSelect.vue";
@@ -6,6 +7,7 @@ vi.mock("@/stores/modules/ui/ui", () => ({ useUIStore: () => ui }));
 
 // Real Vue DOM and command-boundary mocks, not native persistence acceptance.
 beforeEach(() => {
+  setActivePinia(createPinia());
   invokeMock.mockReset();
 });
 describe("independent preset favorites", () => {

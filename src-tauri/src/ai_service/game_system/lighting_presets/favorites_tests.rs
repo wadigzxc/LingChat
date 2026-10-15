@@ -108,7 +108,7 @@ async fn builtin_favorite_atomically_migrates_legacy_users_without_copying_built
         Some(builtin.clone())
     );
     assert_eq!(
-        reopened.take_for_application(&builtin.id).await.unwrap(),
+        reopened.get(&builtin.id).await.unwrap(),
         Some(builtin.clone())
     );
     assert_eq!(
@@ -184,7 +184,7 @@ async fn corrupt_catalog_shapes_and_unknown_versions_are_rejected_without_replac
             "corrupt catalog was accepted: {case}"
         );
         assert!(store.get("builtin:neutral").await.is_err());
-        assert!(store.take_for_application("builtin:neutral").await.is_err());
+        assert!(store.get("builtin:neutral").await.is_err());
         assert!(
             store
                 .create(draft("Must not erase corruption"))
@@ -255,17 +255,13 @@ async fn canonical_metadata_wins_over_embedded_favorite_and_ordinary_update_pres
             .find(|p| p.id == preset.id),
         Some(expected)
     );
-    let taken = store
-        .take_for_application(&preset.id)
-        .await
-        .unwrap()
-        .unwrap();
+    let taken = store.get(&preset.id).await.unwrap().unwrap();
     assert!(!taken.favorite);
     assert_eq!(taken.revision, preset.revision);
     assert_eq!(taken.updated_at, preset.updated_at);
     assert!(
-        taken.last_used_at.is_some(),
-        "retain the existing recent-use path"
+        taken.last_used_at.is_none(),
+        "retrieval alone does not claim a successful application"
     );
     let starred = store.set_favorite(&preset.id, true).await.unwrap();
     let updated = store

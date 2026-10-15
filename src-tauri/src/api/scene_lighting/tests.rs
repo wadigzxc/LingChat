@@ -1,7 +1,5 @@
 use super::asset::resolve_lighting_asset_in;
-use super::commands::{
-    apply_active_lighting_to_scene, preset_request_for_application, scene_for_runtime,
-};
+use super::commands::{apply_active_lighting_to_scene, apply_preset_with, scene_for_runtime};
 use super::model::PreviewRuntimeLightingBackup;
 use super::transition::{
     RuntimeLightingRequest, restore_runtime_lighting, transition_runtime_lighting,
@@ -10,6 +8,22 @@ use crate::ai_service::game_system::lighting_presets::{LightingPresetDraft, Ligh
 use crate::ai_service::game_system::scene_store::LightingParams;
 use crate::ai_service::game_system::scene_transition::{SceneLightingSource, SceneRuntimeState};
 use crate::api::game::should_restore_startup_scene;
+
+async fn test_service(root: &std::path::Path) -> crate::ai_service::service::AIService {
+    crate::ai_service::service::AIService::new(
+        sea_orm::DatabaseConnection::default(),
+        root.to_path_buf(),
+        Default::default(),
+        Default::default(),
+        None,
+        false,
+        10,
+        10,
+        Default::default(),
+        false,
+    )
+    .await
+}
 
 #[tokio::test]
 async fn favorite_command_is_registered_and_metadata_only_with_durable_errors() {
@@ -88,16 +102,15 @@ async fn preset_application_reads_and_marks_one_latest_snapshot_for_manual_and_a
             )
             .await
             .unwrap();
-        let request = preset_request_for_application(&store, &preset.id, source)
+        let service = test_service(root.path()).await;
+        let transition = apply_preset_with(&service, &store, &preset.id, source, |_| Ok(()))
             .await
             .unwrap();
         let stored = store.get(&preset.id).await.unwrap().unwrap();
         assert!(
             stored.last_used_at.is_some(),
-            "application snapshot must already be marked used"
+            "successful command must be marked used"
         );
-        let transition =
-            transition_runtime_lighting(&SceneRuntimeState::neutral(4), None, request).unwrap();
         assert_eq!(transition.active_lighting, stored.lighting);
         assert_eq!(transition.preset_revision, Some(updated.revision));
         assert_eq!(transition.preset_id.as_deref(), Some(preset.id.as_str()));
@@ -108,7 +121,7 @@ async fn preset_application_reads_and_marks_one_latest_snapshot_for_manual_and_a
             "owned applied snapshot survives deletion"
         );
         assert!(
-            preset_request_for_application(&store, &preset.id, source)
+            apply_preset_with(&service, &store, &preset.id, source, |_| Ok(()))
                 .await
                 .is_err()
         );
@@ -144,7 +157,8 @@ fn preset_command_entry_points_use_only_the_atomic_application_snapshot() {
         .split("#[tauri::command]")
         .next()
         .unwrap();
-    assert!(shared.contains("preset_request_for_application(store, id, source).await?"));
+    assert!(shared.contains("apply_preset_with(service, store, id, source"));
+    assert!(shared.contains("with_successful_use(Some(id)"));
     assert!(
         !shared.contains("take_for_application"),
         "must not mark a second snapshot after committing"
@@ -152,7 +166,7 @@ fn preset_command_entry_points_use_only_the_atomic_application_snapshot() {
 }
 
 #[tokio::test]
-async fn preset_application_save_failure_returns_no_runtime_request() {
+async fn preset_usage_save_failure_reports_error_without_half_catalog() {
     let root = tempfile::tempdir().unwrap();
     let store = LightingPresetStore::new(root.path());
     let preset = store
@@ -163,11 +177,28 @@ async fn preset_application_save_failure_returns_no_runtime_request() {
         .await
         .unwrap();
     store.fail_next_save_for_test();
-    let error = preset_request_for_application(&store, &preset.id, SceneLightingSource::AiPreset)
-        .await
-        .err()
-        .unwrap();
+    let service = test_service(root.path()).await;
+    let error = apply_preset_with(
+        &service,
+        &store,
+        &preset.id,
+        SceneLightingSource::AiPreset,
+        |_| Ok(()),
+    )
+    .await
+    .err()
+    .unwrap();
     assert!(error.contains("injected preset save failure"));
+    assert_eq!(
+        service
+            .game_status
+            .lock()
+            .await
+            .active_lighting_preset_id
+            .as_deref(),
+        Some(preset.id.as_str()),
+        "usage persistence is after runtime/publication; no cross-store rollback"
+    );
     assert!(
         store
             .get(&preset.id)
@@ -190,10 +221,17 @@ async fn invalid_preset_application_source_does_not_mark_recent_use() {
         })
         .await
         .unwrap();
+    let service = test_service(root.path()).await;
     assert!(
-        preset_request_for_application(&store, &preset.id, SceneLightingSource::Neutral)
-            .await
-            .is_err()
+        apply_preset_with(
+            &service,
+            &store,
+            &preset.id,
+            SceneLightingSource::Neutral,
+            |_| Ok(())
+        )
+        .await
+        .is_err()
     );
     assert!(
         store

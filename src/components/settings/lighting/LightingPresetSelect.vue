@@ -6,6 +6,7 @@
     setLightingPresetFavorite,
   } from "@/api/services/scene-lighting";
   import type { LightingPreset, PresetSort } from "@/types/scene-lighting";
+  import { useSettingsStore } from "@/stores/modules/settings";
   import { matchesLightingPreset } from "@/utils/scene-lighting/search";
   const props = defineProps<{
     refreshKey?: number;
@@ -20,7 +21,13 @@
   const presets = ref<LightingPreset[]>([]);
 
   const query = ref("");
-  const sort = ref<PresetSort>("favorite_first");
+  const settings = useSettingsStore();
+  const sort = computed<PresetSort>({
+    get: () => settings.display.lightingPresetSort,
+    set: (value) => {
+      settings.display.lightingPresetSort = value;
+    },
+  });
   const visible = computed(() =>
     presets.value
       .filter((p) =>
@@ -33,8 +40,26 @@
         if (sort.value === "favorite_first" && a.favorite !== b.favorite)
           return Number(b.favorite) - Number(a.favorite);
         if (sort.value === "recently_used") {
-          const recent = (b.last_used_at ?? "").localeCompare(a.last_used_at ?? "");
+          const used = Number(b.last_used_at != null) - Number(a.last_used_at != null);
+          if (used) return used;
+          const aTime = Date.parse(a.last_used_at ?? "");
+          const bTime = Date.parse(b.last_used_at ?? "");
+          const valid = Number(Number.isFinite(bTime)) - Number(Number.isFinite(aTime));
+          if (valid) return valid;
+          const recent = bTime - aTime;
           if (recent) return recent;
+          // Date.parse truncates below milliseconds; chrono retains nanoseconds.
+          if (Number.isFinite(aTime)) {
+            const submillisecond = (time: string | null) =>
+              Number(
+                (time?.match(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/i)?.[1] ?? "")
+                  .padEnd(9, "0")
+                  .slice(3, 9)
+              );
+            const precise = submillisecond(b.last_used_at) - submillisecond(a.last_used_at);
+            if (precise) return precise;
+          }
+          return displayName(a).localeCompare(displayName(b)) || a.id.localeCompare(b.id);
         }
         return displayName(a).localeCompare(displayName(b));
       })
@@ -61,6 +86,7 @@
   const { pending, run, text, presetName: displayName, isActive } = useLightingCatalogOperation();
   const { presetClassifications, presetDescription } = useLightingText();
   async function load() {
+    if (!isActive()) return;
     const listed = await listLightingPresets("favorite_first");
     if (!isActive()) return;
     presets.value = listed;

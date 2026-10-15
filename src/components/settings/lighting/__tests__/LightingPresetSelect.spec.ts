@@ -1,10 +1,12 @@
 import { mount, flushPromises } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invokeMock } from "./fixtures";
 import { preset, globalOptions, ui } from "./fixtures";
 import LightingPresetSelect from "../LightingPresetSelect.vue";
 vi.mock("@/stores/modules/ui/ui", async () => ({ useUIStore: () => ui }));
 beforeEach(() => {
+  setActivePinia(createPinia());
   invokeMock.mockResolvedValue([preset()]);
 });
 describe("LightingPresetSelect DOM", () => {

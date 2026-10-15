@@ -10,7 +10,7 @@ use super::catalog::Catalog;
 use super::model::{
     LightingPreset, LightingPresetDraft, LightingPresetUpdate, PresetKind, PresetSort,
 };
-use crate::ai_service::game_system::lighting::LightingParams;
+
 use crate::utils::atomic_file::atomic_replace_file;
 
 pub struct LightingPresetStore {
@@ -48,7 +48,7 @@ impl LightingPresetStore {
             .favorites
             .insert(imported.id.clone(), imported.favorite);
         self.save_catalog(&catalog)?;
-        Ok(imported)
+        Ok(catalog.project(imported))
     }
 
     #[cfg(test)]
@@ -95,7 +95,7 @@ impl LightingPresetStore {
             tags: draft.tags,
             category: draft.category,
             favorite: draft.favorite,
-            last_used_at: draft.last_used_at,
+            last_used_at: None,
             lighting,
             created_at: now.clone(),
             updated_at: now,
@@ -115,30 +115,63 @@ impl LightingPresetStore {
         Ok(catalog.users.into_iter().find(|preset| preset.id == id))
     }
 
-    pub async fn lighting_for_application(&self, id: &str) -> Result<Option<LightingParams>> {
-        Ok(self
-            .take_for_application(id)
-            .await?
-            .map(|preset| preset.lighting))
+    /// Caller owns the service guard. Hold catalog lock from snapshot through
+    /// operation/publication and the atomic usage write. Missing historical
+    /// sources remain optional for scene saves; strict apply validates in callback.
+    /// Usage-save failure does not roll back already committed runtime/scene I/O.
+    pub(crate) async fn with_successful_use<T, F, Fut>(
+        &self,
+        id: Option<&str>,
+        operation: F,
+    ) -> std::result::Result<T, String>
+    where
+        F: FnOnce(Option<LightingPreset>) -> Fut,
+        Fut: std::future::Future<Output = std::result::Result<T, String>>,
+    {
+        self.with_successful_use_if(id, |preset| async move {
+            operation(preset).await.map(|result| (result, true))
+        })
+        .await
     }
 
-    /// Returns an owned preset snapshot for application and records successful
-    /// retrieval as recent use in the same serialized read-modify-write cycle.
-    /// Generated built-ins remain immutable.
-    pub async fn take_for_application(&self, id: &str) -> Result<Option<LightingPreset>> {
+    /// Scene updates decide save intent from the locked previous/final snapshots.
+    pub(crate) async fn with_successful_use_if<T, F, Fut>(
+        &self,
+        id: Option<&str>,
+        operation: F,
+    ) -> std::result::Result<T, String>
+    where
+        F: FnOnce(Option<LightingPreset>) -> Fut,
+        Fut: std::future::Future<Output = std::result::Result<(T, bool), String>>,
+    {
         let _guard = self.mutation_lock.lock().await;
-        let mut catalog = self.load_catalog()?;
-        if let Some(preset) = builtin_presets().into_iter().find(|preset| preset.id == id) {
-            return Ok(Some(catalog.project(preset)));
+        let mut catalog = self.load_catalog().map_err(|e| e.to_string())?;
+        let preset = builtin_presets()
+            .into_iter()
+            .chain(catalog.users.iter().cloned())
+            .find(|p| id.is_some_and(|id| !id.is_empty() && p.id == id))
+            .map(|p| catalog.project(p));
+        let used_id = preset.as_ref().map(|p| p.id.clone());
+        let (result, record_usage) = operation(preset).await?;
+        if let Some(id) = used_id.filter(|_| record_usage) {
+            // Millisecond logical clock: later successful operations are strictly
+            // newer even when wall time ties or moves backwards. Wire DTO stays ISO.
+            let latest = catalog
+                .recent
+                .values()
+                .filter_map(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.timestamp_millis())
+                .max();
+            let millis = latest.map_or(Utc::now().timestamp_millis(), |latest| {
+                Utc::now().timestamp_millis().max(latest.saturating_add(1))
+            });
+            let timestamp = chrono::DateTime::from_timestamp_millis(millis)
+                .ok_or_else(|| "最近使用时间超出范围".to_string())?
+                .to_rfc3339_opts(SecondsFormat::Millis, true);
+            catalog.recent.insert(id, timestamp);
+            self.save_catalog(&catalog).map_err(|e| e.to_string())?;
         }
-
-        let Some(preset) = catalog.users.iter_mut().find(|preset| preset.id == id) else {
-            return Ok(None);
-        };
-        preset.last_used_at = Some(now());
-        let result = preset.clone();
-        self.save_catalog(&catalog)?;
-        Ok(Some(result))
+        Ok(result)
     }
 
     pub async fn list(&self, sort: PresetSort) -> Result<Vec<LightingPreset>> {
@@ -160,7 +193,16 @@ impl LightingPresetStore {
             PresetSort::RecentlyUsed => presets.sort_by(|left, right| {
                 right
                     .last_used_at
-                    .cmp(&left.last_used_at)
+                    .is_some()
+                    .cmp(&left.last_used_at.is_some())
+                    .then_with(|| {
+                        let instant = |p: &LightingPreset| {
+                            p.last_used_at
+                                .as_deref()
+                                .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                        };
+                        instant(right).cmp(&instant(left))
+                    })
                     .then_with(|| compare_name_then_id(left, right))
             }),
         }
@@ -198,6 +240,7 @@ impl LightingPresetStore {
         };
         let removed = catalog.users.remove(index);
         catalog.favorites.remove(id);
+        catalog.recent.remove(id);
         self.save_catalog(&catalog)?;
         Ok(Some(removed))
     }
@@ -252,9 +295,8 @@ fn apply_update(preset: &mut LightingPreset, update: LightingPresetUpdate) {
     if let Some(favorite) = update.favorite {
         preset.favorite = favorite;
     }
-    if let Some(last_used_at) = update.last_used_at {
-        preset.last_used_at = last_used_at;
-    }
+    // last_used_at remains in the DTO for compatibility, but only successful
+    // application/scene-save transactions may change authoritative usage.
     if let Some(mut lighting) = update.lighting {
         lighting.normalize();
         preset.lighting = lighting;

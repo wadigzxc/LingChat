@@ -67,6 +67,8 @@ export interface UpdateSceneRequest extends SceneLightingMetadata {
   scene_description: string;
   background: string;
   lighting?: LightingParams | null;
+  /** Explicit editor-save intent, including identical lighting; does not promote runtime defaults. */
+  lighting_save_intent?: boolean;
   /** Explicit default-save intent; ordinary edits omit this (Rust defaults to false). */
   apply_lighting_as_default?: boolean;
 }

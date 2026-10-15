@@ -162,7 +162,9 @@ describe("scene editor draft", () => {
             settle = () => (failure ? reject(new Error("late failure")) : resolve());
           })
       );
-      const w = await open(initial(), { saveScene });
+      const submit = vi.fn();
+      const close = vi.fn();
+      const w = await open(initial(), { saveScene, onSubmit: submit, onClose: close });
       await w.get('[aria-label="启用单灯受光"]').setValue(true);
       await w
         .findAll("button")
@@ -175,8 +177,8 @@ describe("scene editor draft", () => {
       await flushPromises();
       expect(ui.showSuccess.mock.calls.length).toBe(successes);
       expect(ui.showError.mock.calls.length).toBe(errors);
-      expect(w.emitted("submit")).toBeUndefined();
-      expect(w.emitted("close")).toBeUndefined();
+      expect(submit).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
     });
   it("guards a parent close after a saving failure instead of losing it", async () => {
     let reject!: (error: Error) => void;

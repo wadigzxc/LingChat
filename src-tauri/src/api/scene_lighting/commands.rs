@@ -63,34 +63,6 @@ where
     Ok(payload)
 }
 
-/// Atomically retrieve and mark the sole snapshot used by manual and AI application.
-pub(crate) async fn preset_request_for_application(
-    store: &LightingPresetStore,
-    id: &str,
-    source: SceneLightingSource,
-) -> Result<RuntimeLightingRequest, String> {
-    if !matches!(
-        source,
-        SceneLightingSource::ManualPreset | SceneLightingSource::AiPreset
-    ) {
-        return Err("预设应用来源必须是 manual_preset 或 ai_preset".into());
-    }
-    let preset = store
-        .take_for_application(id)
-        .await
-        .map_err(error_text)?
-        .ok_or_else(|| format!("光影预设不存在: {id}"))?;
-    Ok(match source {
-        SceneLightingSource::ManualPreset => {
-            RuntimeLightingRequest::manual_preset(preset.lighting, preset.id, preset.revision)
-        },
-        SceneLightingSource::AiPreset => {
-            RuntimeLightingRequest::ai_preset(preset.lighting, preset.id, preset.revision)
-        },
-        _ => unreachable!("validated preset source"),
-    })
-}
-
 /// Shared by manual commands and Task 9. AI callers can select a preset through
 /// this function, but cannot submit arbitrary lighting parameters.
 pub(crate) async fn apply_lighting_preset_for_service(
@@ -112,10 +84,46 @@ async fn apply_lighting_preset_id_for_service(
     id: &str,
     source: SceneLightingSource,
 ) -> Result<SceneStatePayload, String> {
-    let request = preset_request_for_application(store, id, source).await?;
-    let payload = commit_runtime_request_for_service(service, move |_| request).await?;
-    crate::api::scene::emit_scene_state(app, &payload)?;
-    Ok(payload)
+    apply_preset_with(service, store, id, source, |payload| {
+        crate::api::scene::emit_scene_state(app, payload)
+    })
+    .await
+}
+
+// Headless seam: production and tests share runtime/persistence code;
+// only native publication is injected. Caller retains the service guard.
+pub(crate) async fn apply_preset_with(
+    service: &AIService,
+    store: &LightingPresetStore,
+    id: &str,
+    source: SceneLightingSource,
+    emit: impl FnOnce(&SceneStatePayload) -> Result<(), String>,
+) -> Result<SceneStatePayload, String> {
+    if !matches!(
+        source,
+        SceneLightingSource::ManualPreset | SceneLightingSource::AiPreset
+    ) {
+        return Err("预设应用来源必须是 manual_preset 或 ai_preset".into());
+    }
+    store
+        .with_successful_use(Some(id), |preset| async move {
+            let preset = preset.ok_or_else(|| format!("光影预设不存在: {id}"))?;
+            let request = match source {
+                SceneLightingSource::ManualPreset => RuntimeLightingRequest::manual_preset(
+                    preset.lighting,
+                    preset.id,
+                    preset.revision,
+                ),
+                SceneLightingSource::AiPreset => {
+                    RuntimeLightingRequest::ai_preset(preset.lighting, preset.id, preset.revision)
+                },
+                _ => unreachable!("validated preset source"),
+            };
+            let payload = commit_runtime_request_for_service(service, move |_| request).await?;
+            emit(&payload)?;
+            Ok(payload)
+        })
+        .await
 }
 
 #[tauri::command]
@@ -229,23 +237,60 @@ pub async fn save_active_lighting_as_scene_default(
 ) -> Result<SceneStatePayload, String> {
     let state = app.state::<AppState>();
     let service = state.ai_service.lock().await;
+    let presets = app.state::<LightingPresetStore>();
+    let store = SceneStore::new(&service.data_dir);
+    save_default_with(
+        &service,
+        &store,
+        &presets,
+        |scene| crate::api::scene::normalize_background(&scene.background),
+        |id| crate::api::scene::persist_scene_selection(&app, id),
+        |payload| crate::api::scene::emit_scene_state(&app, payload),
+    )
+    .await
+}
+
+pub(crate) async fn save_default_with(
+    service: &AIService,
+    store: &SceneStore,
+    presets: &LightingPresetStore,
+    resolve_background: impl FnOnce(&Scene) -> String,
+    persist: impl FnOnce(Option<&str>) -> Result<(), String>,
+    emit: impl FnOnce(&SceneStatePayload) -> Result<(), String>,
+) -> Result<SceneStatePayload, String> {
     let runtime = service.game_status.lock().await.scene_runtime_state();
     let scene_id = runtime
         .current_scene_id
         .as_deref()
         .ok_or_else(|| "当前没有场景，无法保存默认光影".to_string())?;
-
-    let store = SceneStore::new(&service.data_dir);
-    let saved = store
-        .mutate(|scenes| {
-            let scene = scenes
-                .iter_mut()
-                .find(|scene| scene.id == scene_id)
-                .ok_or_else(|| anyhow::anyhow!("当前场景不存在，无法保存默认光影"))?;
-            apply_active_lighting_to_scene(scene, &runtime, chrono::Utc::now().to_rfc3339());
-            Ok(scene.clone())
+    let source = runtime.preset_id.clone();
+    presets
+        .with_successful_use(source.as_deref(), |_| async {
+            let transition = store
+                .mutate(|scenes| {
+                    let scene = scenes
+                        .iter_mut()
+                        .find(|scene| scene.id == scene_id)
+                        .ok_or_else(|| anyhow::anyhow!("当前场景不存在，无法保存默认光影"))?;
+                    apply_active_lighting_to_scene(
+                        scene,
+                        &runtime,
+                        chrono::Utc::now().to_rfc3339(),
+                    );
+                    let background = resolve_background(scene);
+                    crate::ai_service::game_system::scene_transition::transition_scene_selection(
+                        &runtime,
+                        Some(
+                            crate::ai_service::game_system::scene_transition::SceneSelection::new(
+                                scene.clone(),
+                                background,
+                            ),
+                        ),
+                    )
+                    .map_err(anyhow::Error::msg)
+                })
+                .map_err(error_text)?;
+            crate::api::scene::apply_scene_transition_with(service, transition, persist, emit).await
         })
-        .map_err(error_text)?;
-
-    crate::api::scene::apply_scene_selection_for_service(&app, &service, Some(&saved)).await
+        .await
 }

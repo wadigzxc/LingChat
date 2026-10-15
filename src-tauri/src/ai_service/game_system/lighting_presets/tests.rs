@@ -22,12 +22,16 @@ async fn deleting_preset_does_not_touch_lighting_assets() {
 async fn list_sorts_most_recently_used_first_and_never_used_last() {
     let temp = tempfile::tempdir().unwrap();
     let store = LightingPresetStore::new(temp.path());
-    let mut old = draft("A old");
-    old.last_used_at = Some("2026-01-01T00:00:00Z".to_string());
-    store.create(old).await.unwrap();
-    let mut new = draft("Z new");
-    new.last_used_at = Some("2026-02-01T00:00:00Z".to_string());
-    store.create(new).await.unwrap();
+    let old = store.create(draft("A old")).await.unwrap();
+    let new = store.create(draft("Z new")).await.unwrap();
+    store
+        .with_successful_use(Some(&old.id), |_| async { Ok(()) })
+        .await
+        .unwrap();
+    store
+        .with_successful_use(Some(&new.id), |_| async { Ok(()) })
+        .await
+        .unwrap();
     store.create(draft("M never")).await.unwrap();
 
     let users: Vec<_> = store
@@ -48,17 +52,20 @@ async fn list_sorts_most_recently_used_first_and_never_used_last() {
 }
 
 #[tokio::test]
-async fn taking_user_preset_for_application_marks_it_used_in_the_same_transaction() {
+async fn successful_user_application_marks_it_used_in_the_same_transaction() {
     let temp = tempfile::tempdir().unwrap();
     let store = LightingPresetStore::new(temp.path());
     let first = store.create(draft("A first")).await.unwrap();
     let second = store.create(draft("B second")).await.unwrap();
 
-    let applied = store
-        .take_for_application(&first.id)
+    store
+        .with_successful_use(Some(&first.id), |preset| async {
+            assert_eq!(preset.unwrap().id, first.id);
+            Ok(())
+        })
         .await
-        .unwrap()
         .unwrap();
+    let applied = store.get(&first.id).await.unwrap().unwrap();
 
     let users: Vec<_> = store
         .list(PresetSort::RecentlyUsed)
@@ -79,11 +86,7 @@ async fn taking_builtin_for_application_does_not_mutate_generated_builtin() {
     let temp = tempfile::tempdir().unwrap();
     let store = LightingPresetStore::new(temp.path());
 
-    let applied = store
-        .take_for_application("builtin:neutral")
-        .await
-        .unwrap()
-        .unwrap();
+    let applied = store.get("builtin:neutral").await.unwrap().unwrap();
 
     assert!(applied.last_used_at.is_none());
     assert!(!temp.path().join("game_data/lighting_presets.json").exists());
@@ -136,19 +139,15 @@ async fn list_sorts_by_name_with_stable_id_tie_break() {
 }
 
 #[tokio::test]
-async fn application_params_also_use_atomic_recent_use_snapshot() {
+async fn application_params_accessor_does_not_claim_success() {
     let temp = tempfile::tempdir().unwrap();
     let store = LightingPresetStore::new(temp.path());
     let created = store.create(draft("Application source")).await.unwrap();
-    let lighting = store
-        .lighting_for_application(&created.id)
-        .await
-        .unwrap()
-        .unwrap();
+    let lighting = store.get(&created.id).await.unwrap().unwrap().lighting;
     let saved = store.get(&created.id).await.unwrap().unwrap();
     assert!(
-        saved.last_used_at.is_some(),
-        "legacy application accessor must not bypass recent-use transaction"
+        saved.last_used_at.is_none(),
+        "legacy application accessor cannot claim a successful command"
     );
     assert_eq!(lighting, saved.lighting);
 }
@@ -159,11 +158,7 @@ async fn application_params_are_owned_deep_copies() {
     let store = LightingPresetStore::new(temp.path());
     let created = store.create(draft("Copy source")).await.unwrap();
 
-    let mut applied = store
-        .lighting_for_application(&created.id)
-        .await
-        .unwrap()
-        .unwrap();
+    let mut applied = store.get(&created.id).await.unwrap().unwrap().lighting;
     applied.character.glow_color = "#123456".to_string();
     applied.asset_layers.push(Default::default());
 

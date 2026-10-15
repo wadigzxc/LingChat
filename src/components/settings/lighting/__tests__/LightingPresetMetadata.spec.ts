@@ -1,5 +1,6 @@
 import { mount, flushPromises } from "@vue/test-utils";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
 import { createI18n } from "vue-i18n";
 import { readFileSync } from "node:fs";
@@ -11,6 +12,8 @@ import { invokeMock, preset, ui } from "./fixtures";
 import Select from "../LightingPresetSelect.vue";
 import Manager from "../LightingPresetManager.vue";
 vi.mock("@/stores/modules/ui/ui", () => ({ useUIStore: () => ui }));
+
+beforeEach(() => setActivePinia(createPinia()));
 
 const dictionaries = { "zh-CN": cn, "zh-HK": hk, en, ja };
 const locales = Object.keys(dictionaries) as (keyof typeof dictionaries)[];

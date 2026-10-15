@@ -7,6 +7,7 @@ import { setSceneAwareness } from "@/api/services/scene";
 import type { ShortcutAction, ShortcutBinding } from "@/utils/shortcuts";
 import { DEFAULT_SHORTCUTS, sanitizeShortcuts } from "@/utils/shortcuts";
 import { defineStore } from "pinia";
+import type { PresetSort } from "@/types/scene-lighting";
 
 // 默认设置值
 export const DEFAULT_SETTINGS = {
@@ -36,6 +37,7 @@ export const DEFAULT_SETTINGS = {
   // 显示设置
   display: {
     simplifiedLighting: false,
+    lightingPresetSort: "favorite_first" as PresetSort,
     currentBackground: "@/assets/images/default_bg.jpg", // 当前背景图片
     backgroundEffect: "StarField", // 背景效果名称
     mainMenuStarsEnabled: true, // 主菜单星星粒子开关
@@ -94,6 +96,7 @@ export interface AudioSettings {
 }
 export interface DisplaySettings {
   simplifiedLighting: boolean;
+  lightingPresetSort: PresetSort;
   currentBackground: string;
   backgroundEffect: string;
   mainMenuStarsEnabled: boolean;

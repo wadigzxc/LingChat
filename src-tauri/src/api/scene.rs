@@ -7,6 +7,7 @@ use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::ai_service::game_system::lighting_presets::LightingPresetStore;
 use crate::ai_service::game_system::scene_store::{LightingParams, Scene, SceneStore};
 use crate::ai_service::game_system::scene_transition::{
     SceneSelection, SceneStatePayload, StoredSceneSelection, resolve_startup_selection,
@@ -71,6 +72,10 @@ pub struct UpdateSceneRequest {
     /// Explicit default-save intent; omitted by ordinary scene editors.
     #[serde(default)]
     pub apply_lighting_as_default: bool,
+    /// Explicit editor-save intent, independent of runtime default promotion.
+    /// Ordinary background/metadata updates omit this; no frontend usage clock.
+    #[serde(default)]
+    pub lighting_save_intent: bool,
 }
 
 // ========== Helpers ==========
@@ -367,8 +372,20 @@ pub async fn list_scenes(_app: AppHandle) -> Result<Vec<SceneInfo>, String> {
 }
 
 #[tauri::command]
-pub async fn create_scene(_app: AppHandle, req: CreateSceneRequest) -> Result<SceneInfo, String> {
+pub async fn create_scene(app: AppHandle, req: CreateSceneRequest) -> Result<SceneInfo, String> {
+    let state = app.state::<AppState>();
+    let _service = state.ai_service.lock().await;
+    let presets = app.state::<LightingPresetStore>();
     let store = SceneStore::new(&data_dir());
+    let saved = create_scene_with(&store, &presets, req).await?;
+    Ok(model_to_info(&saved))
+}
+
+pub(crate) async fn create_scene_with(
+    store: &SceneStore,
+    presets: &LightingPresetStore,
+    req: CreateSceneRequest,
+) -> Result<Scene, String> {
     let now = now_iso();
     let scene = Scene {
         id: Uuid::new_v4().to_string(),
@@ -383,13 +400,17 @@ pub async fn create_scene(_app: AppHandle, req: CreateSceneRequest) -> Result<Sc
         updated_at: now,
         plugin_id: None,
     };
-    let saved = store
-        .mutate(|scenes| {
-            scenes.push(scene.clone());
-            Ok(scene)
+    let source = scene.lighting_preset_id.clone();
+    presets
+        .with_successful_use(source.as_deref(), |_| async move {
+            store
+                .mutate(|scenes| {
+                    scenes.push(scene.clone());
+                    Ok(scene)
+                })
+                .map_err(|e| format!("保存场景失败: {e}"))
         })
-        .map_err(|e| format!("保存场景失败: {e}"))?;
-    Ok(model_to_info(&saved))
+        .await
 }
 
 #[tauri::command]
@@ -400,42 +421,76 @@ pub async fn update_scene(app: AppHandle, req: UpdateSceneRequest) -> Result<Sce
     let state = app.state::<AppState>();
     let service = state.ai_service.lock().await;
     let store = SceneStore::new(&data_dir());
-    let (previous, updated) = store
-        .mutate(|scenes| {
-            let scene = scenes
-                .iter_mut()
-                .find(|scene| scene.id == req.id)
-                .ok_or_else(|| anyhow::anyhow!("场景 {} 不存在", req.id))?;
-            let previous = scene.clone();
-            scene.name = req.scene_name;
-            scene.description = req.scene_description;
-            scene.background = to_background_filename(&req.background);
-            scene.lighting = req.lighting;
-            scene.lighting_preset_id = req.lighting_preset_id;
-            scene.lighting_preset_revision = req.lighting_preset_revision;
-            scene.lighting_customized = req.lighting_customized;
-            scene.updated_at = now_iso();
-            Ok((previous, scene.clone()))
-        })
-        .map_err(|e| format!("更新场景失败: {e}"))?;
+    let presets = app.state::<LightingPresetStore>();
+    let saved = update_scene_with(
+        &service,
+        &store,
+        &presets,
+        req,
+        |scene| normalize_background(&scene.background),
+        |payload| emit_scene_state(&app, payload),
+    )
+    .await?;
+    Ok(model_to_info(&saved))
+}
 
-    let info = model_to_info(&updated);
-    let resolved_background = normalize_background(&updated.background);
-    let mut game_status = service.game_status.lock().await;
-    let runtime = game_status.scene_runtime_state();
-    if let Some(transition) = transition_scene_update_with_intent(
-        &runtime,
-        &previous,
-        updated,
-        resolved_background,
-        req.apply_lighting_as_default,
-    )? {
-        let payload = SceneStatePayload::from(&transition);
-        game_status.apply_scene_transition(&transition);
-        drop(game_status);
-        emit_scene_state(&app, &payload)?;
-    }
-    Ok(info)
+pub(crate) async fn update_scene_with(
+    service: &AIService,
+    store: &SceneStore,
+    presets: &LightingPresetStore,
+    req: UpdateSceneRequest,
+    resolve_background: impl FnOnce(&Scene) -> String,
+    emit: impl FnOnce(&SceneStatePayload) -> Result<(), String>,
+) -> Result<Scene, String> {
+    let source = req.lighting_preset_id.clone();
+    presets
+        .with_successful_use_if(source.as_deref(), |_| async move {
+            let runtime = service.game_status.lock().await.scene_runtime_state();
+            let (updated, transition, record_usage) = store
+                .mutate(|scenes| {
+                    let scene = scenes
+                        .iter_mut()
+                        .find(|scene| scene.id == req.id)
+                        .ok_or_else(|| anyhow::anyhow!("场景 {} 不存在", req.id))?;
+                    let previous = scene.clone();
+                    scene.name = req.scene_name;
+                    scene.description = req.scene_description;
+                    scene.background = to_background_filename(&req.background);
+                    scene.lighting = req.lighting;
+                    scene.lighting_preset_id = req.lighting_preset_id;
+                    scene.lighting_preset_revision = req.lighting_preset_revision;
+                    scene.lighting_customized = req.lighting_customized;
+                    scene.updated_at = now_iso();
+                    let record_usage = req.lighting_save_intent
+                        || req.apply_lighting_as_default
+                        || previous.lighting != scene.lighting
+                        || previous.lighting_preset_id != scene.lighting_preset_id
+                        || previous.lighting_preset_revision != scene.lighting_preset_revision
+                        || previous.lighting_customized != scene.lighting_customized;
+                    // Validate/convert before scenes.json commits; native emit remains
+                    // after commit and deliberately does not roll persistence back.
+                    let background = resolve_background(scene);
+                    let transition = transition_scene_update_with_intent(
+                        &runtime,
+                        &previous,
+                        scene.clone(),
+                        background,
+                        req.apply_lighting_as_default,
+                    )
+                    .map_err(anyhow::Error::msg)?;
+                    Ok((scene.clone(), transition, record_usage))
+                })
+                .map_err(|e| format!("更新场景失败: {e}"))?;
+            if let Some(transition) = transition {
+                let payload = SceneStatePayload::from(&transition);
+                let mut game_status = service.game_status.lock().await;
+                game_status.apply_scene_transition(&transition);
+                drop(game_status);
+                emit(&payload)?;
+            }
+            Ok((updated, record_usage))
+        })
+        .await
 }
 
 fn delete_scene_from_store(store: &SceneStore, id: &str, base: &Path) -> Result<(), String> {
@@ -517,6 +572,10 @@ pub async fn set_scene_awareness(app: AppHandle, enabled: bool) -> Result<(), St
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "scene_lighting/save_tests.rs"]
+mod recent_save_tests;
 
 #[cfg(test)]
 mod tests {
@@ -867,14 +926,17 @@ mod tests {
             .next()
             .unwrap();
         let lock = body.find("state.ai_service.lock().await").unwrap();
+        let usage_lock = body.find("with_successful_use_if(").unwrap();
+        let snapshot = body
+            .find("service.game_status.lock().await.scene_runtime_state()")
+            .unwrap();
         let mutation = body.find(".mutate(|scenes|").unwrap();
-        let snapshot = body.find("game_status.scene_runtime_state()").unwrap();
-        let emit = body.find("emit_scene_state(&app, &payload)").unwrap();
-        assert!(
-            lock < mutation,
-            "store writes must not overtake runtime events"
-        );
-        assert!(mutation < snapshot && snapshot < emit);
+        let conversion = body
+            .find("let transition = transition_scene_update_with_intent(")
+            .unwrap();
+        let emit = body.find("emit(&payload)").unwrap();
+        assert!(lock < usage_lock && usage_lock < snapshot && snapshot < mutation);
+        assert!(mutation < conversion && conversion < emit);
         assert_eq!(body.matches("state.ai_service.lock().await").count(), 1);
         assert!(!body[lock..emit].contains("drop(service)"));
     }
@@ -901,11 +963,14 @@ mod tests {
         });
         let req: UpdateSceneRequest = serde_json::from_value(legacy.clone()).unwrap();
         assert!(!req.apply_lighting_as_default);
+        assert!(!req.lighting_save_intent);
         assert!(req.lighting.is_none());
         let mut explicit = legacy;
         explicit["apply_lighting_as_default"] = serde_json::json!(true);
+        explicit["lighting_save_intent"] = serde_json::json!(true);
         let req: UpdateSceneRequest = serde_json::from_value(explicit).unwrap();
         assert!(req.apply_lighting_as_default);
+        assert!(req.lighting_save_intent);
         assert_eq!(req.id, "captured");
     }
 

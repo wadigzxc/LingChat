@@ -584,7 +584,7 @@
     RefreshCw,
   } from "lucide-vue-next";
   import { useLightingOperation } from "../lighting/useLightingOperation";
-  const { text: lightingText, presetName } = useLightingOperation();
+  const { text: lightingText, presetName, isActive } = useLightingOperation();
   import type { LightingPreset } from "@/types/scene-lighting";
   const lightingPresets = ref<LightingPreset[]>([]);
   const presetsLoaded = ref(false);
@@ -630,6 +630,15 @@
   import { useUserStore } from "../../../stores/modules/user/user";
 
   const gameStore = useGameStore();
+  // Native events also cover AI application; reads wait for the backend catalog lock.
+  watch(
+    () => gameStore.lightingRevision,
+    () => {
+      if (gameStore.activeLightingSource === "manual" || gameStore.activeLightingSource === "ai") {
+        lightingPresetVersion.value++;
+      }
+    }
+  );
   const uiStore = useUIStore();
   const settingsStore = useSettingsStore();
   const userStore = useUserStore();
@@ -776,6 +785,8 @@
     return runDefaultSave(
       async () => {
         await updateScene(req);
+        if (!isActive()) return;
+        lightingPresetVersion.value++;
         await fetchScenes();
       },
       lightingText("sceneDefaultSaved", "已保存为当前场景默认")
@@ -880,11 +891,14 @@
           scene_description: data.sceneDescription,
           background: data.sceneImage || "",
           lighting: data.lighting ?? null,
+          lighting_save_intent: true,
           lighting_preset_id: data.lighting_preset_id,
           lighting_preset_revision: data.lighting_preset_revision,
           lighting_customized: data.lighting_customized,
         });
       }
+      if (!isActive()) return;
+      lightingPresetVersion.value++;
       await fetchScenes();
     } catch (error) {
       throw error;

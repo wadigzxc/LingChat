@@ -13,6 +13,8 @@ pub(super) struct Catalog {
     pub version: u32,
     pub users: Vec<LightingPreset>,
     pub favorites: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub recent: BTreeMap<String, String>,
 }
 
 impl Catalog {
@@ -41,6 +43,7 @@ impl Catalog {
                 bail!("光影预设 id 为空或重复: {id}");
             }
         }
+        let migrate_recent = value.is_array() || value.get("recent").is_none();
         let mut catalog = if value.is_array() {
             let users: Vec<LightingPreset> = serde_json::from_value(value)?;
             let users: Vec<_> = users
@@ -52,6 +55,7 @@ impl Catalog {
                 version: 1,
                 users,
                 favorites,
+                recent: BTreeMap::new(),
             }
         } else {
             let catalog = serde_json::from_value::<Self>(value)?;
@@ -67,8 +71,20 @@ impl Catalog {
         if catalog.version != 1 {
             bail!("不支持的光影预设 catalog 版本: {}", catalog.version);
         }
+        if migrate_recent {
+            catalog.recent = catalog
+                .users
+                .iter()
+                .filter_map(|p| {
+                    p.last_used_at
+                        .as_ref()
+                        .map(|used| (p.id.clone(), used.clone()))
+                })
+                .collect();
+        }
         for preset in &mut catalog.users {
             preset.favorite = catalog.favorites.get(&preset.id).copied().unwrap_or(false);
+            preset.last_used_at = catalog.recent.get(&preset.id).cloned();
         }
         Ok(catalog)
     }
@@ -80,14 +96,19 @@ impl Catalog {
                 .as_object_mut()
                 .expect("serialized preset object")
                 .remove("favorite");
+            preset
+                .as_object_mut()
+                .expect("serialized preset object")
+                .remove("last_used_at");
         }
         Ok(serde_json::to_vec_pretty(&json!({
-            "version": 1, "users": users, "favorites": self.favorites,
+            "version": 1, "users": users, "favorites": self.favorites, "recent": self.recent,
         }))?)
     }
 
     pub fn project(&self, mut preset: LightingPreset) -> LightingPreset {
         preset.favorite = self.favorites.get(&preset.id).copied().unwrap_or(false);
+        preset.last_used_at = self.recent.get(&preset.id).cloned();
         preset
     }
 }
