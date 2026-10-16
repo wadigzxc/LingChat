@@ -272,6 +272,8 @@ it("updates all five builtin names and short descriptions with real dictionaries
   const { i18n, global } = options();
   const w = mount(Select, { props: { draftOnly: true }, global });
   await flushPromises();
+  expect(w.get("details").attributes("open")).toBeUndefined();
+  await w.get("[data-toggle-presets]").trigger("click");
   const element = w.element;
   for (const locale of locales) {
     i18n.global.locale.value = locale;

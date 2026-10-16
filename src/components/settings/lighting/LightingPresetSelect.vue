@@ -138,7 +138,7 @@
 </script>
 <template>
   <section class="space-y-2 rounded-xl border border-white/20 bg-black/20 p-3 text-white">
-    <details open>
+    <details>
       <summary data-toggle-presets class="cursor-pointer py-2">
         {{ text("choosePreset", "选择光影预设") }}
       </summary>

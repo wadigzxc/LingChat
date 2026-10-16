@@ -196,11 +196,15 @@ describe("LightingPresetSelect DOM", () => {
   it("provides a collapsible searchable dropdown rather than a permanently expanded library", async () => {
     const w = mount(LightingPresetSelect, { global: globalOptions(), attachTo: document.body });
     await flushPromises();
+    expect(w.get("details").attributes("open")).toBeUndefined();
+    await w.get("[data-toggle-presets]").trigger("click");
+    expect(w.get("details").attributes("open")).toBeDefined();
     await w.get("[data-toggle-presets]").trigger("click");
     expect(w.get("details").attributes("open")).toBeUndefined();
     await w.get("[data-toggle-presets]").trigger("click");
     expect(w.get("details").attributes("open")).toBeDefined();
     expect(w.find("[data-search]").exists()).toBe(true);
+    w.unmount();
   });
   it("queues a library refresh that arrives during another pending request", async () => {
     let resolve!: (value: unknown) => void;
