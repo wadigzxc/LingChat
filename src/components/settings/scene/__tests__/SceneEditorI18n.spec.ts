@@ -220,14 +220,23 @@ describe("real scene editor localization", () => {
   it("translates panel controls, hints and aria live in every supported locale without remounting", async () => {
     const global = bootstrap();
     await language("zh-CN");
-    const w = mount(RelightingPanel, { props: { modelValue: lighting() }, global });
+    const w = mount(RelightingPanel, {
+      attachTo: document.body,
+      props: { modelValue: lighting() },
+      global,
+    });
     const element = w.element;
     await language("en");
-    expect(w.get(".enable").text()).toBe("Single-light relighting (supports Live2D models)");
+    expect(
+      w
+        .get('[data-effect-group="relighting"] > .effect-header [data-effect-disclosure]')
+        .text()
+        .slice(2)
+    ).toBe("Single-light relighting (supports Live2D models)");
     for (const { value } of SUPPORTED_LOCALES) {
       await language(value);
       expect(w.element).toBe(element);
-      for (const key of panelKeys.filter((key) => !key.endsWith("Aria"))) {
+      for (const key of panelKeys.filter((key) => !key.endsWith("Aria") && key !== "enable")) {
         expect(w.text()).toContain(message(key));
       }
       for (const key of panelKeys.filter((key) => key.endsWith("Aria"))) {
@@ -240,17 +249,27 @@ describe("real scene editor localization", () => {
           .map((option) => option.text())
       ).toEqual([message("original"), message("relight")]);
       if (value === "en")
-        expect(w.get(".enable").text()).toBe("Single-light relighting (supports Live2D models)");
+        expect(
+          w
+            .get('[data-effect-group="relighting"] > .effect-header [data-effect-disclosure]')
+            .text()
+            .slice(2)
+        ).toBe("Single-light relighting (supports Live2D models)");
       if (value === "ja")
-        expect(w.get(".enable").text()).toBe("単一ライトのライティング（Live2Dモデル対応）");
+        expect(
+          w
+            .get('[data-effect-group="relighting"] > .effect-header [data-effect-disclosure]')
+            .text()
+            .slice(2)
+        ).toBe("単一ライトのライティング（Live2Dモデル対応）");
     }
     await w.setProps({ modelValue: lighting(false) });
-    expect(w.find(".controls").exists()).toBe(false);
+    expect(w.get(".controls").isVisible()).toBe(false);
     await w.get('input[type="checkbox"]').setValue(true);
     const emitted = w.emitted("update:modelValue")![0][0] as ReturnType<typeof lighting>;
     expect(emitted.relighting!.enabled).toBe(true);
     await w.setProps({ modelValue: emitted });
-    expect(w.find(".controls").exists()).toBe(true);
+    expect(w.get(".controls").isVisible()).toBe(true);
     const relight = lighting();
     relight.relighting!.mode = "relight";
     await w.setProps({ modelValue: relight });

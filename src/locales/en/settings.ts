@@ -1,6 +1,14 @@
 // English language pack, maintained from zh-CN/settings.ts
 export default {
   lighting: {
+    groups: {
+      main_light: "Main light",
+      vignette: "Vignette",
+      character_ambient: "Character ambient",
+      rim_light: "Rim light",
+      bloom: "Bloom",
+      background_ambient: "Background ambient",
+    },
     relighting: {
       centerHandleAria: "Point light position; fine-tune with arrow keys",
       radiusHandleAria: "Point light range; fine-tune with arrow keys",

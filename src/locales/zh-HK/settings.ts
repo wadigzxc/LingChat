@@ -1,6 +1,14 @@
 // 繁體中文（香港 · 粵語文體）语言包，由 zh-CN/settings.ts（约 586 条，最大文件） 翻譯維護
 export default {
   lighting: {
+    groups: {
+      main_light: "主光",
+      vignette: "暗角",
+      character_ambient: "角色環境色",
+      rim_light: "輪廓光",
+      bloom: "泛光",
+      background_ambient: "場景環境色",
+    },
     relighting: {
       centerHandleAria: "單燈位置，用方向鍵微調",
       radiusHandleAria: "單燈範圍，用方向鍵微調",

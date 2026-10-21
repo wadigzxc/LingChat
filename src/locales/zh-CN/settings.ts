@@ -1,5 +1,13 @@
 export default {
   lighting: {
+    groups: {
+      main_light: "主光",
+      vignette: "暗角",
+      character_ambient: "角色环境色",
+      rim_light: "轮廓光",
+      bloom: "泛光",
+      background_ambient: "场景环境色",
+    },
     relighting: {
       centerHandleAria: "单灯位置，方向键微调",
       radiusHandleAria: "单灯范围，方向键微调",

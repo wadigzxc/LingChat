@@ -1,5 +1,13 @@
 export default {
   lighting: {
+    groups: {
+      main_light: "メインライト",
+      vignette: "ビネット",
+      character_ambient: "キャラクター環境色",
+      rim_light: "リムライト",
+      bloom: "ブルーム",
+      background_ambient: "背景環境色",
+    },
     relighting: {
       centerHandleAria: "ポイントライトの位置、矢印キーで微調整",
       radiusHandleAria: "ポイントライトの範囲、矢印キーで微調整",

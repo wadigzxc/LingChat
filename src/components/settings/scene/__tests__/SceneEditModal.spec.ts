@@ -150,7 +150,12 @@ describe("scene editor draft", () => {
   it("names lighting presets and explicitly includes Live2D support without exclusivity", async () => {
     const w = await open();
     expect(w.get("[data-legacy-lighting] summary").text()).toBe("光影与预设");
-    expect(w.get(".relighting-panel .enable").text()).toBe("单灯受光（支持 Live2D 模型）");
+    expect(
+      w
+        .get('[data-effect-group="relighting"] > .effect-header [data-effect-disclosure]')
+        .text()
+        .slice(2)
+    ).toBe("单灯受光（支持 Live2D 模型）");
     w.unmount();
   });
   for (const failure of [false, true])
@@ -780,7 +785,7 @@ describe("scene editor draft", () => {
     expect(w.get("[data-preview-background]").attributes("src")).toContain(
       encodeURIComponent("C:/room.png")
     );
-    await w.get("select").setValue("C:/new.png");
+    await w.get('[aria-label="场景图片"]').setValue("C:/new.png");
     expect(w.get("[data-preview-background]").attributes("src")).toContain(
       encodeURIComponent("C:/new.png")
     );
