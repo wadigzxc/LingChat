@@ -13,6 +13,13 @@
 
 ---
 
+> [!IMPORTANT]
+> **本仓库是 fork，用作「场景光影 / 轻量 2.5D 重打光」的公开设计参考。**
+>
+> - 本分支基于上游 `848fd344`（`main`），包含该功能的完整实现（前端 `src/` 77 个文件、后端 `src-tauri/src/` 60 个 Rust 文件）与设计文档。
+> - 上游开发线 `dev` 在之后把后端从 `src-tauri/src/` 重构进 `crates/ling-chat-main/`（337 个提交）。**本分支未跟进这次重构，不能直接合并进 `dev`**。
+> - 设计说明：[docs/features/scene-lighting.md](docs/features/scene-lighting.md) · 进度与未完成项：[docs/features/scene-lighting-progress.md](docs/features/scene-lighting-progress.md)
+
 ## 🖥️ 快速指引 & 社区支持
 
 <table width="100%">
