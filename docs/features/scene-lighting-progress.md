@@ -11,9 +11,10 @@ tags: [LingChat, 进度, 光影, 2.5D, relighting]
 | 项 | 值 |
 | --- | --- |
 | 分支 | `feat/846-scene-lighting-v1` |
-| 分支头 | `bd2c5c49`（docs: close verified effect grouping Task 5） |
-| 相对 `main` | 42 个提交、232 个文件、+42,011 / −2,473 行 |
-| 提交构成 | feat 22 · fix 9 · docs 7 · test 2 · ci 1 · refactor 1 |
+| 功能实现范围 | 到 `bd2c5c49` 为止（含）：42 个提交、232 个文件、+42,011 / −2,473 行，相对 `main` = `848fd344` |
+| 提交构成（功能部分） | feat 22 · fix 9 · docs 7 · test 2 · ci 1 · refactor 1 |
+| 文档提交 | 本进度文档、设计文档中新增的 relighting 一节、README 的光影小节与 fork 说明，均为纯文档提交，不改变代码 |
+| 分支头 | 以 `git rev-parse --short HEAD` 为准；分支相对 `main` 的总提交/文件数用 `git rev-list --count origin/main..HEAD` 与 `git diff --stat origin/main...HEAD` 现查，不在文档里写死（文档提交会让它递增） |
 | 时间跨度 | 2026-09-26（`4c1675e9` 计划） → 2026-10-21（`bd2c5c49`） |
 | 工作区 | 干净（Task 6 半成品已回退，不入库） |
 
@@ -38,6 +39,8 @@ tags: [LingChat, 进度, 光影, 2.5D, relighting]
 | 7–10 | 见 `.scratch/lighting-presets-ux/issues/` | 未开始 | — |
 
 「闭环」提交只改文档与 Issue 勾选记录，不改产品代码。
+
+文件数口径：本文的 232/234 是 git 改动文件数；按目录拆分时 `src/` 下为 133 个（其中 77 个非测试源码文件，另含测试与 3 个 `__tests__` 下的说明 md），`src-tauri/src/` 下为 60 个 `.rs`。
 
 ## 四、验证到了哪一层
 
