@@ -117,8 +117,93 @@ CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=1 node scripts/c
 > [!NOTE] 验证范围
 > 本 Task 的实际本机环境是 Windows。Linux 矩阵已配置但本机 WSL 探测超时，未安装或启动新环境；远程 CI 未 push/dispatch；没有真机视觉、GPU 像素、帧率或移动设备结论。这些不以单测替代，Task19 未实施。
 
+## 轻量 2.5D 重打光（relighting）
+
+这一节讲"新光影怎么设计"。它与上面的旧滤镜系统是**两条互斥路径**，不是叠加关系。
+
+### 与旧滤镜的关系
+
+旧路径把饱和度/亮度/对比度编译成 CSS `filter`、把主光编译成 `linear-gradient`、把轮廓光编译成 `drop-shadow`，再叠 PNG 素材层（`src/utils/scene-lighting/style.ts::compileLighting`）。新路径是 Pixi/WebGL 片元着色器，逐像素算光照。
+
+`resolveLightingRoute`（`src/utils/scene-lighting/relighting/route.ts`）是唯一的仲裁者，只返回三种结果：
+
+| 路由 | 触发条件 | legacy 是否允许 |
+| --- | --- | --- |
+| `identity` | `compareBypass`（按住"原图"）、`lighting.enabled=false`、`master_intensity=0` | **否** |
+| `legacy` | `lighting.relighting` 缺失或 `relighting.enabled=false` | 是 |
+| `relighting` | `relighting.enabled=true` | **否** |
+
+两条硬规则：
+
+- `compileLighting` 只在路由为 `legacy` 时产出 CSS；进入 relighting 后它返回 `filter:"none"` 和全 null，所以 **target 不匹配、WebGL 不可用都不会偷偷回退旧滤镜**，而是返回 `identity` 并带上 reason（`target-miss`、`webgl-unavailable`、`source-unavailable` 等）。
+- `LightingParams.relighting` 缺失/null 的语义是"按旧方式渲染"，**不是**"自动启用新效果"。旧场景打开不会因为升级而突然变样。
+
+### 四段管线
+
+| 段 | 位置 | 职责 | 关键约定 |
+| --- | --- | --- | --- |
+| 路由 | `relighting/route.ts` | identity / legacy / relighting | 单一路由；能力或目标缺失时降级为 identity，不降级为 legacy |
+| 规格编译 | `relighting/math.ts::compileRelightingShaderSpec` | 把参数换算成 GPU 直接可用的 `ShaderSpec` | 目标不匹配、能力不可用、几何不可解 → `identity` + reason |
+| 着色器 | `relighting/glsl.ts::lightingGlsl` | 逐像素光照 | sRGB 只解码一次、只编码一次；预乘 alpha 进出各一次 |
+| 绑定 | `relighting/filter.ts::RelightingFilter`、`relighting/bindings.ts` | 把 spec 送进 Pixi 渲染 | 两种源各有所有权边界，见下 |
+
+### 参数模型与边界
+
+Rust 侧权威结构（`src-tauri/src/ai_service/game_system/lighting/relighting.rs`）：
+
+```text
+RelightingParams
+├─ enabled: bool                    // 是否走新管线（默认 false）
+├─ mode: relight | original         // original 时环境视为白色 1.0
+├─ target: character | background | both
+├─ ambient     { intensity 0–2,  color #RRGGBB }
+└─ point_light { enabled, x 0–1, y 0–1, radius 0.01–2,
+                 softness 0–1, intensity 0–4, color #RRGGBB }
+```
+
+- `normalize()` 逐字段钳制；非有限值（NaN/Inf）回落默认，不写进存档。
+- 颜色只接受不透明 `#RRGGBB`，前端的 `relighting-params.ts` 用同一规则做防御副本；旧滤镜那套 `#RGB/#RGBA/#RRGGBBAA` 规则与新字段互相独立。
+- 前端传给 GPU 的 `ShaderSpec`（`relighting/types.ts`）只有 7 个字段：`sourceSizeCss`、`localToScene`、`lightSceneCss`、`radiusSceneCss`、`softness`、`baseSignedLinear`、`pointLinear`。
+
+### 着色器数学（`glsl.ts`）
+
+1. 片元局部坐标经 `uLocalToScene` 变到场景 CSS 坐标，算到灯心距离 `d`。
+2. 衰减 `f`：`softness=0` 时是硬边（`d<radius`）；否则 `f = 1 - smoothstep(radius*(1-softness), radius, d)`，内圈全亮、外圈平滑归零。
+3. 增益：`gain = max(0, uBase + uPoint * f)`。`uBase` 由 `baseSignedLinear = 1 - master + master*ambient` 得来，`uPoint = master * color * intensity`（灯关闭时为 0）。
+4. 色彩：解码预乘样本 → 线性 → 乘 gain → clamp → 编码回 sRGB → 重新预乘。**这一步保证不会二次编码，也不会把 alpha 改掉。**
+5. `master_intensity` 是唯一的全局缩放口；它为 0 时走 identity（原图），而不是"渲染成一片黑"。
+
+### 两种源的所有权边界
+
+| 源 | 入口 | 所有权 | 明确不做的事 |
+| --- | --- | --- | --- |
+| 背景 / 静态立绘（DOM 图栈，最多两层） | `bindings.ts::createDomImageBinding` | 自建惰性 renderer | 不接管 ticker、不解码、不改源像素、不引入 GPU 缓动时钟 |
+| 正式 Live2D 舞台 | `bindings.ts::bindPixiCharacterSurface` | 借用模型 stage，只加一个 `Filter` | 不上传 canvas、不碰 Assets/SDK/ticker；legacy/identity 分支必须 detach |
+
+`probeRelightingCapability(renderer)` 在持有 renderer 时返回不可用原因字符串；不可用一律 `identity` + reason，不静默降级成旧滤镜。
+
+ready 的 Live2D 本体不套 CSS 滤镜，走的是绑定在舞台上的这一个 Filter；视觉边界与上面「Live2D 与质量矩阵」一致。
+
+### 本提交的已知现状
+
+- **只有一盏点光**：没有 z 轴/高度，没有平行光、锥形光，也不支持多光源。
+- **5 款内置预设都没有设置 `relighting`**：`lighting_presets/builtins.rs` 里 `relighting` 出现 0 次，所以启用新管线后它们全部落到默认值（白环境 1.0 + 中心暖点光 0.85 / r0.75 / soft0.8），彼此看不出区别。这是当前最明显的待办，不是"调得不好"。
+- 着色器没有去色/单色通道（该提交里不存在 `monochrome`）。
+- 未做真机视觉、GPU 像素级和帧率验收，细节见 `scene-lighting-progress.md`。
+
+### 预设与交互改动（#888 Task 1–5）
+
+| Task | 交付 |
+| --- | --- |
+| 1 | 选择器去重；一个当前语言名称 + 一句说明 + 去重分类；别名只用于搜索；内置件四语切换，自建件名称说明不翻译 |
+| 2 | 收藏独立持久化：版本 1 catalog `{version, users, favorites}`；不复制内置预设效果、不开放内置参数修改 |
+| 3 | 最近成功使用：只在"成功应用 / 编辑器成功保存"后记录，预览/取消/失败不记；重启保留，排序稳定 |
+| 4 | 设置页与编辑器的预设选择区默认折叠；同一实例保留用户展开状态，折叠不取消光影，可用键盘操作 |
+| 5 | 效果参数组：箭头 + 组名 + 启用开关同级；开自动展开、关收起并保留参数；未启用可手动展开预调；共接入 9 处（8 条 enabled 路径） |
+
 ## 相关文档
 
 - [[linglight-v1]]
+- [[scene-lighting-progress]]
 
 #LingChat #功能说明 #渲染/光影 #兼容回归
